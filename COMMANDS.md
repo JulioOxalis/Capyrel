@@ -549,3 +549,13 @@ php artisan capyrel:audit
 php artisan capyrel:clean --force   # remove generated code first
 composer remove julio/capyrel       # then remove the package
 ```
+one command and do all
+php artisan capyrel:fullstack
+
+The right way — one command
+After composer require julio/capyrel:
+
+
+php artisan capyrel:install-extension
+
+composer update julio/capyrel

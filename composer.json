@@ -1,0 +1,45 @@
+{
+    "name": "julio/capyrel",
+    "description": "Intelligent Laravel scaffolding — reads your DB and writes models, controllers, and blade views automatically",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "scaffold",
+        "relationships",
+        "eloquent",
+        "artisan",
+        "generator"
+    ],
+    "require": {
+        "php": "^8.2",
+        "laravel/framework": "^11.0|^12.0"
+    },
+    "require-dev": {
+        "pestphp/pest": "^3.0",
+        "orchestra/testbench": "^9.0|^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Julio\\Capyrel\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Julio\\Capyrel\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Julio\\Capyrel\\CapyrelServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable"
+}

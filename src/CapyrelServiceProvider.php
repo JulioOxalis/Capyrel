@@ -17,8 +17,14 @@ use Julio\Capyrel\Analyzers\NamingConflictAnalyzer;
 use Julio\Capyrel\Analyzers\OrphanForeignKeyAnalyzer;
 use Julio\Capyrel\Analyzers\SchemaFillableDriftAnalyzer;
 use Julio\Capyrel\Analyzers\SoftDeleteAnalyzer;
+use Julio\Capyrel\Commands\AuditCommand;
+use Julio\Capyrel\Commands\CleanCommand;
 use Julio\Capyrel\Commands\DemoCommand;
+use Julio\Capyrel\Commands\FactoryCommand;
 use Julio\Capyrel\Commands\InstallExtensionCommand;
+use Julio\Capyrel\Commands\OptimizeCommand;
+use Julio\Capyrel\Commands\PolicyCommand;
+use Julio\Capyrel\Commands\SeedCommand;
 use Julio\Capyrel\Detectors\FrameworkDetector;
 use Julio\Capyrel\Commands\MapCommand;
 use Julio\Capyrel\Commands\RequestsCommand;
@@ -28,10 +34,13 @@ use Julio\Capyrel\Commands\ScaffoldCommand;
 use Julio\Capyrel\Commands\TestsCommand;
 use Julio\Capyrel\Commands\WatchCommand;
 use Julio\Capyrel\Generators\ApiResourceGenerator;
+use Julio\Capyrel\Generators\FactoryGenerator;
 use Julio\Capyrel\Generators\FormRequestGenerator;
 use Julio\Capyrel\Generators\FullBladeGenerator;
+use Julio\Capyrel\Generators\PolicyGenerator;
 use Julio\Capyrel\Generators\RelationMethodGenerator;
 use Julio\Capyrel\Generators\RelationshipTestGenerator;
+use Julio\Capyrel\Generators\SeederGenerator;
 use Julio\Capyrel\Schema\RelationshipDetector;
 use Julio\Capyrel\Schema\SchemaAnalyzer;
 use Julio\Capyrel\Writers\BladeWriter;
@@ -56,6 +65,9 @@ class CapyrelServiceProvider extends ServiceProvider
         $this->app->singleton(FormRequestGenerator::class);
         $this->app->singleton(FullBladeGenerator::class);
         $this->app->singleton(RelationshipTestGenerator::class);
+        $this->app->singleton(FactoryGenerator::class);
+        $this->app->singleton(PolicyGenerator::class);
+        $this->app->singleton(SeederGenerator::class);
 
         // Writers
         $this->app->singleton(ModelWriter::class);
@@ -98,6 +110,16 @@ class CapyrelServiceProvider extends ServiceProvider
                 // Safety + watch
                 SafeMigrateCommand::class,
                 WatchCommand::class,
+
+                // Generators
+                FactoryCommand::class,
+                PolicyCommand::class,
+                SeedCommand::class,
+                OptimizeCommand::class,
+
+                // Audit + clean
+                AuditCommand::class,
+                CleanCommand::class,
 
                 // Demo + extension
                 DemoCommand::class,

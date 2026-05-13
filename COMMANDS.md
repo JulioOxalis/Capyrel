@@ -2,7 +2,7 @@
 
 Complete guide to every command. Written for the package owner.
 
-**Current version: v1.1.0**
+**Current version: v1.6.0**
 
 ---
 
@@ -13,255 +13,94 @@ Complete guide to every command. Written for the package owner.
 3. [model:resources](#3-modelresources)
 4. [model:requests](#4-modelrequests)
 5. [model:tests](#5-modeltests)
-6. [migrate:safe](#6-migratesafe)
-7. [model:watch](#7-modelwatch)
-8. [capyrel:demo](#8-capyreldemo)
-9. [VS Code Extension](#9-vs-code-extension)
+6. [model:factory](#6-modelfactory)
+7. [model:policy](#7-modelpolicy)
+8. [model:seed](#8-modelseed)
+9. [model:optimize](#9-modeloptimize)
+10. [model:livewire](#10-modellivewire)
+11. [model:enum](#11-modelenum)
+12. [model:events](#12-modelevents)
+13. [migrate:safe](#13-migratesafe)
+14. [model:watch](#14-modelwatch)
+15. [capyrel:fullstack](#15-capyrelfullstack)
+16. [capyrel:audit](#16-capyrelaudit)
+17. [capyrel:clean](#17-capyrelclean)
+18. [capyrel:demo](#18-capyreldemo)
+19. [capyrel:install-extension](#19-capyrelinstall-extension)
 
 ---
 
-## Global Notes
-
-Every command that reads the database accepts `--connection=` so you can point it at any configured connection in your `config/database.php`.
+## Global flags (every command)
 
 ```bash
---connection=mysql
+--connection=mysql    # use a specific DB connection
 --connection=pgsql
 --connection=sqlite
 --connection=mongodb
-```
 
-If omitted, capyrel uses your app's default connection (`DB_CONNECTION` in `.env`).
-
-Every command that writes files accepts:
-
-```bash
---dry-run     # preview everything, write nothing
---force       # skip all confirmation prompts
+--dry-run             # preview everything, write nothing
+--force               # skip all yes/no prompts
 ```
 
 ---
 
 ## 1. `model:scaffold`
 
-**The core command.** Reads your entire DB schema, detects every relationship, and writes code across four layers: models, controllers, blade views, and routes.
-
-### Signature
+Reads your DB schema, detects all 8 Eloquent relationship types, and writes models, controllers, blade pages, and routes.
 
 ```bash
-php artisan model:scaffold {model?} {--connection=} {--models} {--controllers} {--views} {--routes} {--dry-run} {--force}
+php artisan model:scaffold                     # interactive wizard
+php artisan model:scaffold User                # one model only
+php artisan model:scaffold --dry-run           # preview without writing
+php artisan model:scaffold --models            # models only
+php artisan model:scaffold --controllers       # controllers only
+php artisan model:scaffold --views             # blade pages only
+php artisan model:scaffold --routes            # routes/web.php only
+php artisan model:scaffold --force             # skip all prompts
+php artisan model:scaffold --connection=pgsql  # specific DB
 ```
 
-### Arguments
+**What each model gets:**
+- Relationship methods injected (`hasMany`, `belongsTo`, `belongsToMany`, etc.)
+- Controller with inline `$request->validate([...])` rules (no `validated()` crash)
+- Eager loading on `index()` and `show()` — N+1 prevented automatically
 
-| Argument | Description |
+**What the blade index page contains (v1.6.0 modal-first):**
+
+| Element | Behaviour |
 |---|---|
-| `model` | *(optional)* Scaffold only this model. e.g. `User` |
+| **New button** | Opens right-side offcanvas with create form — no page load |
+| **Row hover** | View / Edit / Delete icons appear |
+| **View icon** | Opens quick-view slide-over populated from JSON — zero server round-trip |
+| **Edit icon** | Navigates to dedicated edit page |
+| **Delete icon** | Opens confirmation modal with item name |
+| **Search bar** | Live client-side filter — no server request |
+| **Form submit** | Button disables + spinner + "Creating…" text |
+| **Toast** | Auto-dismissing success notification |
 
-### Options
+**Standalone vs dependent models:**
 
-| Option | Description |
-|---|---|
-| `--connection=` | DB connection to use. Defaults to app default. |
-| `--models` | Write relationship methods to model files only |
-| `--controllers` | Generate/update controllers only |
-| `--views` | Generate full blade pages (index, show, create, edit) |
-| `--routes` | Write resource routes to routes/web.php |
-| `--dry-run` | Show everything that would happen, write nothing |
-| `--force` | Skip all yes/no confirmation prompts |
+Capyrel detects whether a model is standalone (`User`, `Post`) or dependent (`Comment`, `Attachment`, `OrderItem`). Dependent models get nested routes and inline forms on the parent's show page — never a `/comments/create` page.
 
-### How it runs
+**Health check — runs on every scaffold:**
 
-1. Connects to the database and reads the schema
-2. Detects all 8 Eloquent relationship types
-3. Detects your CSS framework (Bootstrap / Tailwind / plain)
-4. Displays the relationship tree in the terminal
-5. Runs the full health check (12 analyzers)
-6. Asks: write models? generate controllers? generate blade pages? write routes?
-7. Writes only what you confirm
-
-### What it writes to models
-
-```php
-// capyrel: posts.user_id
-public function posts(): \Illuminate\Database\Eloquent\Relations\HasMany
-{
-    return $this->hasMany(Post::class);
-}
-
-// capyrel: pivot: role_user
-public function roles(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
-{
-    return $this->belongsToMany(Role::class);
-}
-```
-
-It never overwrites existing methods — only adds what is missing.
-
-### What it writes to controllers
-
-```php
-// Injects eager loading into existing index/show methods
-$users = User::with(['posts', 'profile', 'roles'])->paginate(15);
-
-// Generates a sync method for every belongsToMany relationship
-public function syncRoles(Request $request, User $user)
-{
-    $user->roles()->sync($request->input('roles_ids', []));
-    return back()->with('success', 'Role updated.');
-}
-```
-
-### What it generates for blade views *(v1.1.0)*
-
-Generates **4 fully working pages** per model, styled for your detected CSS framework:
-
-| Page | What's inside |
-|---|---|
-| `index.blade.php` | Table with columns, pagination, create button, delete confirm |
-| `show.blade.php` | All fields in a detail card + relationship sections |
-| `create.blade.php` | Full form with correct input types, validation error messages |
-| `edit.blade.php` | Same form pre-filled with existing model values |
-
-**Bootstrap detected:**
-```blade
-<div class="card shadow-sm">
-    <div class="card-body">
-        <div class="mb-3">
-            <label class="form-label">Title</label>
-            <input type="text" name="title" class="form-control @error('title') is-invalid @enderror">
-            @error('title') <div class="invalid-feedback">{{ $message }}</div> @enderror
-        </div>
-    </div>
-</div>
-```
-
-**Tailwind detected:**
-```blade
-<div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
-    <div class="p-6">
-        <div>
-            <label class="block text-sm font-medium text-gray-700">Title</label>
-            <input type="text" name="title" class="mt-1 block w-full rounded-md border-gray-300 @error('title') border-red-500 @enderror">
-            @error('title') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
-        </div>
-    </div>
-</div>
-```
-
-Framework is auto-detected from `package.json`, `composer.json`, and CSS files — no config needed.
-
-### What it writes to routes *(v1.1.0)*
-
-Appends resource routes to `routes/web.php`:
-
-```php
-// capyrel: generated resource routes
-Route::middleware(['auth'])->group(function () {
-    Route::resource('users', App\Http\Controllers\UserController::class);
-    Route::resource('posts', App\Http\Controllers\PostController::class);
-});
-```
-
-**Oxalis detection:** if `julio/oxalis` is found in `composer.json`, capyrel uses it directly. If not, it asks in the terminal:
-
-```
-No authentication package detected.
-Install Oxalis (passkey-first auth for Laravel)? [yes/no]
-```
-- **Yes** → runs `composer require julio/oxalis:@dev` then writes routes
-- **No** → writes routes with standard `auth` middleware
-
-### Health check — runs automatically on every scaffold
-
-After showing the relationship tree, capyrel runs 12 analyzers:
-
-| Analyzer | What it catches |
-|---|---|
-| **N+1 query** | Relationship access inside `foreach` loops in controllers |
-| **Missing index** | FK columns with no index (full table scans on every eager load) |
-| **Orphan FK** | `_id` columns referencing tables that don't exist |
-| **Inverse missing** | `User hasMany Post` exists but `Post belongsTo User` doesn't |
-| **Naming conflict** | Generated method name matches an existing model method |
-| **Soft-delete** | Table has `deleted_at` but model doesn't use `SoftDeletes` trait |
-| **Eager depth** | `hasManyThrough` chain is 3+ levels deep |
-| **Circular dependency** | Self-referential model that would loop on eager-load |
-| **Cascade risk** | FK without `ON DELETE CASCADE` (orphaned rows on parent delete) |
-| **Dead relationship** | Relationship method defined but never used anywhere |
-| **Fillable drift** | Columns in `$fillable` that don't exist in the table (SQL only) |
-| **Morph registry** | `morphTo()` used without `Relation::morphMap()` |
-
-Severity levels:
-- `✖ error` — will cause bugs or data loss
-- `⚠ warning` — risky, should be reviewed
-- `ℹ info` — informational, your call
-
-### Examples
-
-```bash
-# Interactive wizard — safest way to run
-php artisan model:scaffold
-
-# Preview everything without touching any file
-php artisan model:scaffold --dry-run
-
-# Scaffold only the Post model
-php artisan model:scaffold Post
-
-# Only inject relationships into model files
-php artisan model:scaffold --models
-
-# Only generate blade pages
-php artisan model:scaffold --views
-
-# Only write routes
-php artisan model:scaffold --routes
-
-# Run non-interactively (CI/CD, scripting)
-php artisan model:scaffold --force
-
-# Read from a specific DB connection
-php artisan model:scaffold --connection=pgsql
-```
+12 analyzers fire automatically: N+1 risk, missing indexes, orphan FKs, inverse missing, naming conflicts, soft-delete, eager depth, circular deps, cascade risk, dead relationships, fillable drift, morph registry.
 
 ---
 
 ## 2. `model:map`
 
-Generates a visual diagram of all models and their relationships.
-
-### Signature
+Visual diagram of every model and relationship.
 
 ```bash
-php artisan model:map {--format=ascii} {--connection=} {--save=}
+php artisan model:map                                 # ASCII tree
+php artisan model:map --format=mermaid                # Mermaid.js for GitHub
+php artisan model:map --format=both
+php artisan model:map --save=docs/schema.md           # save to file
+php artisan model:map --connection=mysql
 ```
 
-### Options
-
-| Option | Default | Description |
-|---|---|---|
-| `--format=` | `ascii` | Output format: `ascii` \| `mermaid` \| `both` |
-| `--connection=` | app default | DB connection to read from |
-| `--save=` | *(none)* | Save output to a file path, e.g. `--save=docs/schema.md` |
-
-### ASCII output
-
-```
-  ╔══════════════════════════════════════════╗
-  ║    CAPYREL — MODEL RELATIONSHIP MAP      ║
-  ╚══════════════════════════════════════════╝
-  10 models · 18 relationships
-
-  User
-  ├── hasMany          ──▶ Post
-  ├── hasOne           ──▶ Profile
-  ├── belongsToMany    ──▶ Role
-  └── hasManyThrough   ──▶ Comment  (via Post)
-```
-
-### Mermaid output
-
-Paste directly into any GitHub markdown or [mermaid.live](https://mermaid.live):
+Mermaid output — paste into any GitHub markdown:
 
 ```mermaid
 erDiagram
@@ -270,47 +109,11 @@ erDiagram
     User }o--o{ Role : "belongsToMany"
 ```
 
-### Examples
-
-```bash
-php artisan model:map
-php artisan model:map --format=mermaid
-php artisan model:map --format=both
-php artisan model:map --format=mermaid --save=docs/relationships.md
-php artisan model:map --connection=mysql
-```
-
 ---
 
 ## 3. `model:resources`
 
-Generates API Resource classes with `whenLoaded()` on all relationships — N+1 impossible by design.
-
-### Signature
-
-```bash
-php artisan model:resources {model?} {--connection=} {--force} {--dry-run}
-```
-
-### Generated file example (`app/Http/Resources/UserResource.php`)
-
-```php
-public function toArray(Request $request): array
-{
-    return [
-        'id'    => $this->id,
-        'name'  => $this->name,
-        'email' => $this->email,
-
-        // capyrel: relationships — only included when eager-loaded
-        'posts'   => PostResource::collection($this->whenLoaded('posts')),
-        'profile' => new ProfileResource($this->whenLoaded('profile')),
-        'roles'   => RoleResource::collection($this->whenLoaded('roles')),
-    ];
-}
-```
-
-### Examples
+Generates API Resource classes. All relationships use `whenLoaded()` — N+1 structurally impossible.
 
 ```bash
 php artisan model:resources
@@ -319,40 +122,17 @@ php artisan model:resources --dry-run
 php artisan model:resources --force
 ```
 
+Generated `UserResource::toArray()` includes:
+```php
+'posts'   => PostResource::collection($this->whenLoaded('posts')),
+'profile' => new ProfileResource($this->whenLoaded('profile')),
+```
+
 ---
 
 ## 4. `model:requests`
 
-Generates `Store` and `Update` Form Request classes with validation rules from column types and constraints.
-
-### Signature
-
-```bash
-php artisan model:requests {model?} {--connection=} {--force} {--dry-run}
-```
-
-### Column → rule mapping
-
-| Column | Generated rule |
-|---|---|
-| `NOT NULL` | `'required'` |
-| `nullable` | `'nullable'` |
-| `varchar(255)` | `'string', 'max:255'` |
-| `text` | `'string'` |
-| `integer` / `bigint` | `'integer'` |
-| `boolean` | `'boolean'` |
-| `decimal` / `float` | `'numeric'` |
-| `date` / `datetime` | `'date'` |
-| `json` | `'array'` |
-| FK column (`*_id`) | `'integer', 'exists:table,id'` |
-| Unique index | `Rule::unique('table', 'column')` |
-| Column named `email` | adds `'email'` |
-| Column named `password` | `'string', 'min:8', 'confirmed'` |
-
-**Store** → uses `'required'` on non-nullable columns
-**Update** → uses `'sometimes'` on all columns (safe partial updates)
-
-### Examples
+Generates `Store` and `Update` Form Request classes from actual column types and constraints.
 
 ```bash
 php artisan model:requests
@@ -361,41 +141,26 @@ php artisan model:requests --dry-run
 php artisan model:requests --force
 ```
 
+**Column → rule mapping:**
+
+| Column | Rule |
+|---|---|
+| `NOT NULL` varchar | `required, string, max:255` |
+| `nullable` | `nullable` instead of `required` |
+| `*_id` FK column | `integer, exists:table,id` |
+| unique index | `Rule::unique('table')` |
+| named `email` | adds `email` |
+| named `password` | `string, min:8, confirmed` |
+| `datetime` | `date` |
+| `json` | `array` |
+
+**Update requests** use `sometimes` instead of `required` (safe for partial updates).
+
 ---
 
 ## 5. `model:tests`
 
 Generates Pest test files for every detected relationship.
-
-### Signature
-
-```bash
-php artisan model:tests {model?} {--connection=} {--force} {--dry-run}
-```
-
-### Generated file example (`tests/Models/UserTest.php`)
-
-```php
-describe('User relationships', function () {
-
-    it('User::posts() returns a HasMany', function () {
-        expect((new User)->posts())->toBeInstanceOf(HasMany::class);
-    });
-
-    it('User::profile() returns a HasOne', function () {
-        expect((new User)->profile())->toBeInstanceOf(HasOne::class);
-    });
-
-    it('User can attach Role', function () {
-        $user = User::factory()->create();
-        $role = Role::factory()->create();
-        $user->roles()->attach($role->id);
-        expect($user->fresh()->roles)->toHaveCount(1);
-    })->skip('Requires factory and DB — remove skip() to enable');
-});
-```
-
-### Examples
 
 ```bash
 php artisan model:tests
@@ -404,221 +169,354 @@ php artisan model:tests --dry-run
 php artisan model:tests --force
 ```
 
-Run with: `php artisan test --filter=relationships`
+Each file contains:
+- **Type assertion tests** — `expect((new User)->posts())->toBeInstanceOf(HasMany::class)` — no DB needed
+- **Integration tests** — factory-based, skipped by default — remove `->skip()` to enable
+
+Run: `php artisan test --filter=relationships`
 
 ---
 
-## 6. `migrate:safe`
+## 6. `model:factory`
+
+Generates Eloquent factories with smart Faker values derived from column names and types.
+
+```bash
+php artisan model:factory
+php artisan model:factory User
+php artisan model:factory --dry-run
+php artisan model:factory --force
+```
+
+**60+ smart mappings:**
+
+| Column name | Generated Faker |
+|---|---|
+| `email` | `fake()->unique()->safeEmail()` |
+| `name` | `fake()->name()` |
+| `password` | `bcrypt('password')` |
+| `price`, `amount` | `fake()->randomFloat(2, 1, 999)` |
+| `status` | `fake()->randomElement(['active', 'inactive', 'pending'])` |
+| `slug` | `fake()->unique()->slug()` |
+| `*_id` FK | `RelatedModel::factory()` |
+| `body`, `content` | `fake()->paragraphs(2, true)` |
+| `lat`, `lng` | `fake()->latitude()` / `fake()->longitude()` |
+
+**Auto-generated states:** `->deleted()`, `->unverified()`, `->active()`, `->published()`
+
+---
+
+## 7. `model:policy`
+
+Generates Laravel Policies detecting ownership columns automatically.
+
+```bash
+php artisan model:policy
+php artisan model:policy Post
+php artisan model:policy --dry-run
+php artisan model:policy --force
+```
+
+Detects owner columns: `user_id`, `author_id`, `owner_id`, `created_by`
+
+Generated `update()` / `delete()`:
+```php
+public function update(User $user, Post $post): bool
+{
+    return $post->user_id === $user->id;
+}
+```
+
+Register after generation:
+```php
+Gate::policy(Post::class, PostPolicy::class);
+```
+
+---
+
+## 8. `model:seed`
+
+Generates seeders in **topological FK order** — parents always seeded before children.
+
+```bash
+php artisan model:seed
+php artisan model:seed User
+php artisan model:seed --count=20      # 20 records per model
+php artisan model:seed --dry-run
+php artisan model:seed --force
+php artisan model:seed --no-database   # skip updating DatabaseSeeder
+```
+
+- Builds a dependency graph from `belongsTo` relationships
+- Sorts models so `User` is seeded before `Post` (posts need users)
+- Rewrites `DatabaseSeeder.php` with the correct call order
+
+Run: `php artisan db:seed`
+
+---
+
+## 9. `model:optimize`
+
+Adds missing properties and methods to existing model files.
+
+```bash
+php artisan model:optimize
+php artisan model:optimize User
+php artisan model:optimize --dry-run
+php artisan model:optimize --force
+```
+
+**What it adds:**
+
+| Addition | Condition |
+|---|---|
+| `$fillable` | Missing from model |
+| `$casts` | datetime/boolean/json columns present |
+| `$hidden` | password/token columns present |
+| `scopeActive()` | `status` column exists |
+| `scopePublished()` | `published_at` column exists |
+| `scopeSearch($term)` | title/name/body/email columns exist |
+| `getFullNameAttribute()` | `first_name` + `last_name` both exist |
+
+---
+
+## 10. `model:livewire`
+
+Generates Livewire components: a searchable/sortable table and a live-validated form.
+
+```bash
+php artisan model:livewire
+php artisan model:livewire User
+php artisan model:livewire --dry-run
+php artisan model:livewire --force
+```
+
+Installs Livewire automatically if not present.
+
+**Generated files per model:**
+
+| File | What it does |
+|---|---|
+| `app/Livewire/UserTable.php` | Searchable, sortable, paginated — `wire:model.live` search |
+| `resources/views/livewire/user-table.blade.php` | Table with `wire:click` delete + `wire:confirm` |
+| `app/Livewire/UserForm.php` | Create/edit with live validation, fires `user-saved` event |
+| `resources/views/livewire/user-form.blade.php` | Real-time form fields |
+
+Usage in blade:
+```blade
+<livewire:user-table />
+<livewire:user-form />
+```
+
+---
+
+## 11. `model:enum`
+
+Generates PHP 8.1 backed Enum classes for `status`, `type`, `role`, `priority` columns.
+
+```bash
+php artisan model:enum
+php artisan model:enum Post
+php artisan model:enum --dry-run
+php artisan model:enum --force
+```
+
+Generated `PostStatus` enum includes:
+```php
+enum PostStatus: string
+{
+    case Active   = 'active';
+    case Inactive = 'inactive';
+    case Pending  = 'pending';
+
+    public function label(): string { ... }   // "Active", "Inactive"
+    public function color(): string { ... }   // "green", "gray", "yellow"
+    public function badge(): string { ... }   // "badge bg-success"
+    public static function options(): array { ... }  // for select dropdowns
+}
+```
+
+Add to your model:
+```php
+protected $casts = ['status' => PostStatus::class];
+```
+
+---
+
+## 12. `model:events`
+
+Generates Event classes and Observer stubs for every model.
+
+```bash
+php artisan model:events
+php artisan model:events Post
+php artisan model:events --dry-run
+php artisan model:events --force
+```
+
+**Generated files per model:**
+
+| File | |
+|---|---|
+| `app/Events/PostCreated.php` | Dispatchable, SerializesModels |
+| `app/Events/PostUpdated.php` | |
+| `app/Events/PostDeleted.php` | |
+| `app/Observers/PostObserver.php` | created/updated/deleted/restored stubs |
+| `capyrel-observer-registrations.php` | Copy into `AppServiceProvider::boot()` |
+
+---
+
+## 13. `migrate:safe`
 
 Scans pending migrations for dangerous patterns before running them.
 
-### Signature
-
 ```bash
-php artisan migrate:safe {--check} {--force} {--database=} {--path=}
+php artisan migrate:safe           # scan + confirm + run
+php artisan migrate:safe --check   # scan only, never runs
+php artisan migrate:safe --force   # run without confirmation
+php artisan migrate:safe --check --database=mysql
 ```
 
-### Options
-
-| Option | Description |
-|---|---|
-| `--check` | Scan only — never runs migrations |
-| `--force` | Skip confirmation even if issues found |
-| `--database=` | DB connection to use |
-| `--path=` | Migration path |
-
-### Dangerous patterns detected
+**Patterns detected:**
 
 | Pattern | Severity |
 |---|---|
 | `Schema::drop()` / `Schema::dropIfExists()` | error |
-| `TRUNCATE` inside a migration | error |
+| `TRUNCATE` inside migration | error |
 | NOT NULL column without `->default()` on existing table | error |
 | `->dropColumn()` | warning |
 | `->unique()` on existing table | warning |
 | `->change()` column type | warning |
 | `->renameColumn()` / `Schema::rename()` | warning |
 | Manual FK without index | info |
-| Type narrowing (`bigInteger` → `integer`) | warning |
-
-### Examples
-
-```bash
-php artisan migrate:safe           # scan + confirm + run
-php artisan migrate:safe --check   # scan only
-php artisan migrate:safe --force   # run without asking
-php artisan migrate:safe --check --database=mysql
-```
 
 ---
 
-## 7. `model:watch`
+## 14. `model:watch`
 
-Watches `database/migrations/` and auto-injects new relationship methods when migrations change.
-
-### Signature
-
-```bash
-php artisan model:watch {--connection=} {--interval=2}
-```
-
-### Options
-
-| Option | Default | Description |
-|---|---|---|
-| `--connection=` | app default | DB connection to read from |
-| `--interval=` | `2` | Poll interval in seconds |
-
-### Terminal output while running
-
-```
-  Capyrel Watch Mode
-  Watching database/migrations/
-  Polling every 2s · Press Ctrl+C to stop
-
-  ✔ Initial scan complete — 18 relationships detected
-
-  [14:32:11] New migration: 2026_05_13_add_team_id_to_posts.php
-  ✔ Post: 1 new relationship(s) injected
-    + belongsTo(Team) via posts.team_id
-```
-
-### Examples
+Watches `database/migrations/` and auto-injects new relationship methods when you add a migration.
 
 ```bash
 php artisan model:watch
 php artisan model:watch --connection=mysql
-php artisan model:watch --interval=5
+php artisan model:watch --interval=5    # check every 5 seconds
+```
+
+Press `Ctrl+C` to stop. Shows exactly which method was injected and from which migration.
+
+---
+
+## 15. `capyrel:fullstack`
+
+Runs all 12 scaffold steps in the correct order in one command.
+
+```bash
+php artisan capyrel:fullstack
+php artisan capyrel:fullstack --dry-run
+php artisan capyrel:fullstack --force
+php artisan capyrel:fullstack --skip=livewire,events    # skip specific steps
+php artisan capyrel:fullstack --connection=pgsql
+```
+
+**Step order:**
+
+```
+1.  model:scaffold    → models, controllers, blade, routes
+2.  model:resources   → API resources
+3.  model:requests    → form requests
+4.  model:factory     → Faker factories
+5.  model:policy      → authorization policies
+6.  model:seed        → seeders in FK-safe order
+7.  model:optimize    → fillable, casts, scopes, search
+8.  model:enum        → PHP 8.1 enums
+9.  model:events      → events + observers
+10. model:tests       → Pest relationship tests
+11. model:livewire    → Livewire components (if installed)
+12. capyrel:audit     → full health report
 ```
 
 ---
 
-## 8. `capyrel:demo`
+## 16. `capyrel:audit`
 
-Creates a temporary SQLite demo database, seeds it with example tables, runs `model:scaffold --dry-run`, and cleans up.
+Generates a complete health report of your schema and relationships.
 
-### Signature
+```bash
+php artisan capyrel:audit                        # saves CAPYREL_AUDIT.md
+php artisan capyrel:audit --output=docs/audit.md # custom path
+php artisan capyrel:audit --json                 # JSON output
+php artisan capyrel:audit --ci                   # exit non-zero if errors (CI/CD)
+```
+
+Report contains: summary table, all 12 health check findings, full relationship map, recommended next steps. Use `--ci` in GitHub Actions to block merges when schema errors exist.
+
+---
+
+## 17. `capyrel:clean`
+
+Removes all capyrel-generated code from your project.
+
+```bash
+php artisan capyrel:clean              # interactive — asks before each layer
+php artisan capyrel:clean --dry-run    # show what would be removed
+php artisan capyrel:clean --force      # remove everything without prompts
+php artisan capyrel:clean --models     # remove injected model methods only
+php artisan capyrel:clean --controllers
+php artisan capyrel:clean --views
+php artisan capyrel:clean --routes
+```
+
+**Run this BEFORE `composer remove julio/capyrel`** — once the package is removed the command no longer exists.
+
+Full removal:
+```bash
+php artisan capyrel:clean --force
+composer remove julio/capyrel
+```
+
+---
+
+## 18. `capyrel:demo`
+
+Creates a temporary SQLite database, seeds it with example tables, runs `model:scaffold --dry-run`, and cleans up. Use before running capyrel on your real project.
 
 ```bash
 php artisan capyrel:demo
 ```
 
-No options — fully automated. Use this to see capyrel in action before running it on your real project.
+No options. Fully automated.
 
 ---
 
-## 9. VS Code Extension
+## 19. `capyrel:install-extension`
 
-The capyrel VS Code extension gives you command palette access to all artisan commands, a relationship sidebar, and PHP/Blade snippets — all from inside VS Code.
-
-### Installing the extension
-
-The extension code is bundled inside the capyrel package at `vendor/julio/capyrel/vscode-capyrel/`.
-
-**One-time setup — run this after `composer require julio/capyrel`:**
+Installs the Capyrel VS Code extension into your editor.
 
 ```bash
-cd vendor/julio/capyrel/vscode-capyrel
-npm install
-npm run compile
-npm run package
-code --install-extension capyrel-1.0.0.vsix
+php artisan capyrel:install-extension
 ```
 
-After this, the extension is permanently installed in VS Code. You never need to reinstall it unless you update to a new version of capyrel.
+The pre-built `.vsix` ships inside the package — no npm or Node.js required.
 
-### Accessing commands
+If VS Code CLI is not in your PATH (common on Windows):
+1. Open VS Code
+2. `Ctrl+Shift+P` → **"Shell Command: Install 'code' command in PATH"**
+3. Reopen terminal
+4. Run `php artisan capyrel:install-extension` again
 
-Once installed, open the **Command Palette** (`Ctrl+Shift+P` on Windows/Linux, `Cmd+Shift+P` on Mac) and type **"Capyrel"**. You will see:
-
-| Command | What it runs |
-|---|---|
-| `Capyrel: Scaffold (dry-run preview)` | `php artisan model:scaffold --dry-run` |
-| `Capyrel: Scaffold (write files)` | `php artisan model:scaffold` |
-| `Capyrel: Show Relationship Map` | `php artisan model:map` |
-| `Capyrel: Export Mermaid Diagram` | `php artisan model:map --format=mermaid --save=docs/capyrel-schema.md` |
-| `Capyrel: Generate API Resources` | `php artisan model:resources` |
-| `Capyrel: Generate Form Requests` | `php artisan model:requests` |
-| `Capyrel: Generate Relationship Tests` | `php artisan model:tests` |
-| `Capyrel: Check Migrations (migrate:safe)` | `php artisan migrate:safe --check` |
-| `Capyrel: Start Watch Mode` | `php artisan model:watch` |
-| `Capyrel: Run Demo` | `php artisan capyrel:demo` |
-
-All commands open in the integrated terminal and run in your project root automatically.
-
-### Relationship sidebar
-
-In the **Explorer panel** (left sidebar), you will see a **"Capyrel Relationships"** section. It shows a live tree of all your models and their detected relationships. It auto-refreshes every time a migration file changes.
-
-```
-▼ CAPYREL RELATIONSHIPS
-  ▼ User
-      Post        hasMany
-      Profile     hasOne
-      Role        belongsToMany
-  ▼ Post
-      User        belongsTo
-      Comment     hasMany
-  ► Comment
-  ► Role
-```
-
-### PHP Snippets
-
-Type these prefixes in any `.php` file and press `Tab`:
-
-| Prefix | Generates |
-|---|---|
-| `cap:hasone` | `hasOne()` relationship method |
-| `cap:hasmany` | `hasMany()` relationship method |
-| `cap:belongsto` | `belongsTo()` relationship method |
-| `cap:btm` | `belongsToMany()` relationship method |
-| `cap:hmt` | `hasManyThrough()` relationship method |
-| `cap:morphto` | `morphTo()` relationship method |
-| `cap:morphmany` | `morphMany()` relationship method |
-| `cap:resource` | Full `toArray()` method with `whenLoaded()` |
-| `cap:rules` | Form Request `rules()` scaffold |
-
-### Blade Snippets
-
-Type these prefixes in any `.blade.php` file and press `Tab`:
-
-| Prefix | Generates |
-|---|---|
-| `cap:forelse` | `@forelse` loop over a relationship |
-| `cap:whenloaded` | `@if` check for hasOne / belongsTo |
-| `cap:bsinput` | Bootstrap 5 form input with error handling |
-| `cap:twinput` | Tailwind CSS form input with error handling |
-| `cap:delete` | DELETE form with CSRF and confirm dialog |
-| `cap:sync` | belongsToMany sync form with checkboxes |
-
-### Updating the extension
-
-When you update capyrel (`composer update julio/capyrel`), rebuild the extension:
-
-```bash
-cd vendor/julio/capyrel/vscode-capyrel
-npm run compile && npm run package
-code --install-extension capyrel-1.0.0.vsix
-```
+**Extension features:**
+- Command Palette (`Ctrl+Shift+P` → type "Capyrel") — all 19 commands accessible
+- **Capyrel Relationships** panel in Explorer sidebar — live tree of all models, auto-refreshes on migration changes
+- PHP snippets: `cap:hasmany`, `cap:belongsto`, `cap:btm`, `cap:hmt`, `cap:morphto`, `cap:resource`, `cap:rules`
+- Blade snippets: `cap:forelse`, `cap:bsinput`, `cap:twinput`, `cap:delete`, `cap:sync`
 
 ---
 
 ## Quick reference
 
 ```bash
-# See all capyrel commands
 php artisan list | grep -E "model:|migrate:safe|capyrel"
-
-# Help for any command
 php artisan help model:scaffold
-php artisan help model:map
-php artisan help model:resources
-php artisan help model:requests
-php artisan help model:tests
-php artisan help migrate:safe
-php artisan help model:watch
-php artisan help capyrel:demo
 ```
 
 ---
@@ -626,73 +524,28 @@ php artisan help capyrel:demo
 ## Recommended workflow — new project
 
 ```bash
-# 1. Dry-run first
-php artisan model:scaffold --dry-run
-
-# 2. Map to understand your schema
-php artisan model:map --format=both
-
-# 3. Check migrations are safe
-php artisan migrate:safe --check
-
-# 4. Full scaffold (models + controllers + blade pages + routes)
-php artisan model:scaffold
-
-# 5. Generate API layer
-php artisan model:resources
-php artisan model:requests
-
-# 6. Generate tests
-php artisan model:tests
-
-# 7. Start watch mode while building
-php artisan model:watch
+php artisan migrate                 # run your migrations first
+php artisan capyrel:fullstack       # does everything in one command
 ```
 
 ## Recommended workflow — existing project
 
 ```bash
-# 1. Preview only — zero risk
-php artisan model:scaffold --dry-run
-
-# 2. Models first (safest)
-php artisan model:scaffold --models
-
-# 3. Then controllers
+php artisan model:scaffold --dry-run    # preview
+php artisan model:scaffold --models     # start with models only
 php artisan model:scaffold --controllers
-
-# 4. Then blade pages
 php artisan model:scaffold --views
-
-# 5. Then routes
 php artisan model:scaffold --routes
-
-# 6. Generate tests to verify
+php artisan model:factory
+php artisan model:policy
 php artisan model:tests
-
-# 7. Save schema map to docs
 php artisan model:map --format=mermaid --save=docs/schema.md
+php artisan capyrel:audit
 ```
 
-php artisan model:scaffold      # models + controllers + blade + routes
-php artisan model:resources     # API resources with whenLoaded()
-php artisan model:requests      # form requests from column types
-php artisan model:factory       # Faker factories (60+ smart mappings)
-php artisan model:policy        # policies with owner detection
-php artisan model:seed          # seeders in FK-safe topological order
-php artisan model:optimize      # fillable, casts, scopes, search, accessors
-php artisan model:enum          # PHP 8.1 backed Enums with labels + colors
-php artisan model:events        # Events + Observers for every model
-php artisan model:tests         # Pest relationship tests
-php artisan model:livewire      # Livewire table (live search) + form components
-php artisan capyrel:audit       # full health report → CAPYREL_AUDIT.md
-php artisan capyrel:clean       # remove all generated code
+## Removing capyrel
 
-# Update capyrel to latest version
-composer update julio/capyrel
-
-# Remove ALL generated files/code first (clean your project)
-php artisan capyrel:clean
-
-# Then remove the package itself
-composer remove julio/capyrel
+```bash
+php artisan capyrel:clean --force   # remove generated code first
+composer remove julio/capyrel       # then remove the package
+```

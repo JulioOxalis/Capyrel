@@ -1,15 +1,26 @@
 {
     "name": "julio/capyrel",
-    "description": "Intelligent Laravel scaffolding — reads your DB and writes models, controllers, and blade views automatically",
+    "description": "Laravel scaffolding that reads your database and generates Eloquent relationships, API resources, form requests, and Pest tests automatically.",
     "type": "library",
     "license": "MIT",
+    "homepage": "https://github.com/JulioOxalis/Capyrel",
+    "authors": [
+        {
+            "name": "Julio",
+            "homepage": "https://github.com/JulioOxalis"
+        }
+    ],
     "keywords": [
         "laravel",
         "scaffold",
         "relationships",
         "eloquent",
         "artisan",
-        "generator"
+        "generator",
+        "code-generator",
+        "laravel-package",
+        "schema",
+        "migrations"
     ],
     "require": {
         "php": "^8.2",

@@ -4,17 +4,65 @@ namespace Julio\Capyrel\Detectors;
 
 class FrameworkDetector
 {
-    private ?string $cached = null;
+    private ?string $cached      = null;
+    private ?bool   $alpineCached = null;
+    private ?bool   $livewireCached = null;
 
     public function detect(): string
     {
         if ($this->cached) return $this->cached;
-
         return $this->cached = $this->resolve();
     }
 
     public function isTailwind(): bool  { return $this->detect() === 'tailwind'; }
     public function isBootstrap(): bool { return $this->detect() === 'bootstrap'; }
+
+    public function hasAlpine(): bool
+    {
+        if ($this->alpineCached !== null) return $this->alpineCached;
+
+        $pkgPath = base_path('package.json');
+        if (file_exists($pkgPath)) {
+            $pkg  = json_decode(file_get_contents($pkgPath), true) ?? [];
+            $deps = array_merge($pkg['dependencies'] ?? [], $pkg['devDependencies'] ?? []);
+            if (isset($deps['alpinejs']) || isset($deps['@alpinejs/morph'])) {
+                return $this->alpineCached = true;
+            }
+        }
+
+        // Breeze / Jetstream include Alpine by default
+        $composerPath = base_path('composer.json');
+        if (file_exists($composerPath)) {
+            $composer = json_decode(file_get_contents($composerPath), true) ?? [];
+            $packages = array_merge($composer['require'] ?? [], $composer['require-dev'] ?? []);
+            if (isset($packages['laravel/breeze']) || isset($packages['laravel/jetstream'])) {
+                return $this->alpineCached = true;
+            }
+        }
+
+        // Check if Alpine is referenced in any blade layout
+        $layouts = glob(resource_path('views/layouts/*.blade.php'));
+        foreach (array_slice($layouts, 0, 3) as $layout) {
+            if (str_contains(file_get_contents($layout), 'alpine') || str_contains(file_get_contents($layout), 'x-data')) {
+                return $this->alpineCached = true;
+            }
+        }
+
+        return $this->alpineCached = false;
+    }
+
+    public function hasLivewire(): bool
+    {
+        if ($this->livewireCached !== null) return $this->livewireCached;
+
+        $composerPath = base_path('composer.json');
+        if (!file_exists($composerPath)) return $this->livewireCached = false;
+
+        $composer = json_decode(file_get_contents($composerPath), true) ?? [];
+        $packages = array_merge($composer['require'] ?? [], $composer['require-dev'] ?? []);
+
+        return $this->livewireCached = isset($packages['livewire/livewire']);
+    }
 
     private function resolve(): string
     {

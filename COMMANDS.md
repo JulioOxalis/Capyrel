@@ -673,3 +673,17 @@ php artisan model:tests
 # 7. Save schema map to docs
 php artisan model:map --format=mermaid --save=docs/schema.md
 ```
+
+php artisan model:scaffold      # models + controllers + blade + routes
+php artisan model:resources     # API resources with whenLoaded()
+php artisan model:requests      # form requests from column types
+php artisan model:factory       # Faker factories (60+ smart mappings)
+php artisan model:policy        # policies with owner detection
+php artisan model:seed          # seeders in FK-safe topological order
+php artisan model:optimize      # fillable, casts, scopes, search, accessors
+php artisan model:enum          # PHP 8.1 backed Enums with labels + colors
+php artisan model:events        # Events + Observers for every model
+php artisan model:tests         # Pest relationship tests
+php artisan model:livewire      # Livewire table (live search) + form components
+php artisan capyrel:audit       # full health report → CAPYREL_AUDIT.md
+php artisan capyrel:clean       # remove all generated code

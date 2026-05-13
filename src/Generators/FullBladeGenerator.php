@@ -5,89 +5,372 @@ namespace Julio\Capyrel\Generators;
 use Illuminate\Support\Str;
 use Julio\Capyrel\Detectors\FrameworkDetector;
 
+/**
+ * Generates fully interactive blade pages.
+ * Detects: CSS framework (Bootstrap/Tailwind), Alpine.js, Livewire
+ * and generates the richest possible interactive code for each combination.
+ */
 class FullBladeGenerator
 {
     public function __construct(private FrameworkDetector $framework) {}
 
-    // ── Public entry points ───────────────────────────────────────────────────
+    // ── Public API ────────────────────────────────────────────────────────────
 
     public function generateIndex(string $model, array $columns): string
+    {
+        return $this->isTw()
+            ? $this->twIndex($model, $columns)
+            : $this->bsIndex($model, $columns);
+    }
+
+    public function generateShow(string $model, array $columns, array $relationships): string
+    {
+        return $this->isTw()
+            ? $this->twShow($model, $columns, $relationships)
+            : $this->bsShow($model, $columns, $relationships);
+    }
+
+    public function generateCreate(string $model, array $columns, array $relationships): string
+    {
+        return $this->isTw()
+            ? $this->twForm($model, $columns, $relationships, 'create')
+            : $this->bsForm($model, $columns, $relationships, 'create');
+    }
+
+    public function generateEdit(string $model, array $columns, array $relationships): string
+    {
+        return $this->isTw()
+            ? $this->twForm($model, $columns, $relationships, 'edit')
+            : $this->bsForm($model, $columns, $relationships, 'edit');
+    }
+
+    // ── Tailwind + Alpine.js Index ────────────────────────────────────────────
+
+    private function twIndex(string $model, array $columns): string
     {
         $plural   = Str::camel(Str::plural($model));
         $singular = Str::camel($model);
         $route    = Str::kebab(Str::plural($model));
         $title    = Str::headline(Str::plural($model));
-        $cols     = $this->displayColumns($columns);
+        $cols     = $this->displayCols($columns);
+        $headers  = $this->twHeaders($cols);
+        $cells    = $this->twCells($singular, $cols);
+        $hasAlpine = $this->framework->hasAlpine();
 
-        return $this->fw() === 'tailwind'
-            ? $this->twIndex($model, $plural, $singular, $route, $title, $cols)
-            : $this->bsIndex($model, $plural, $singular, $route, $title, $cols);
+        $search = $hasAlpine
+            ? '<input x-model="search" type="search" placeholder="Search ' . Str::headline(Str::plural($model)) . '..." class="block w-64 rounded-lg border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500">'
+            : '<input type="search" name="search" value="{{ request(\'search\') }}" placeholder="Search..." class="block w-64 rounded-lg border-gray-300 shadow-sm text-sm">';
+
+        $xData   = $hasAlpine ? 'x-data="{ search: \'\', deleteUrl: \'\', showDeleteModal: false }"' : '';
+        $rowShow = $hasAlpine
+            ? 'x-show="!search || JSON.stringify($el.textContent).toLowerCase().includes(search.toLowerCase())"'
+            : '';
+        $deleteBtn = $hasAlpine
+            ? "@click=\"showDeleteModal = true; deleteUrl = '{{ route('{$route}.destroy', \${$singular}) }}'\""
+            : "onclick=\"if(!confirm('Delete this {$model}? This cannot be undone.')) return false;\" form=\"delete-{$singular}-{{ \${$singular}->id }}\"";
+        $deleteForm = $hasAlpine
+            ? ''
+            : "<form id=\"delete-{$singular}-{{ \${$singular}->id }}\" action=\"{{ route('{$route}.destroy', \${$singular}) }}\" method=\"POST\" class=\"hidden\">@csrf @method('DELETE')</form>";
+
+        $modal = $hasAlpine ? $this->twDeleteModal($model) : '';
+
+        return <<<BLADE
+<x-app-layout>
+    <x-slot name="header">
+        <div class="flex items-center justify-between">
+            <h2 class="text-xl font-semibold text-gray-800">{$title}</h2>
+            <a href="{{ route('{$route}.create') }}"
+               class="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 active:scale-95 transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                New {$model}
+            </a>
+        </div>
+    </x-slot>
+
+    <div class="py-12">
+        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8" {$xData}>
+
+            {{-- Toast notification --}}
+            @if(session('success'))
+                <div x-data="{ show: true }" x-show="show" x-transition
+                     x-init="setTimeout(() => show = false, 4000)"
+                     class="mb-4 flex items-center justify-between p-4 bg-green-50 border border-green-200 rounded-xl text-green-800 text-sm">
+                    <span class="flex items-center gap-2">
+                        <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        {{ session('success') }}
+                    </span>
+                    <button @click="show = false" class="text-green-600 hover:text-green-800">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            @endif
+
+            {{-- Search + filters --}}
+            <div class="mb-4 flex items-center gap-3">
+                {$search}
+            </div>
+
+            {{-- Table --}}
+            <div class="bg-white shadow-sm rounded-xl overflow-hidden">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+{$headers}
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-100">
+                        @forelse(\${$plural} as \${$singular})
+                        <tr {$rowShow} class="hover:bg-gray-50 transition-colors group">
+{$cells}
+{$deleteForm}
+                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
+                                <div class="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <a href="{{ route('{$route}.show', \${$singular}) }}"
+                                       class="inline-flex items-center px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 transition">
+                                        View
+                                    </a>
+                                    <a href="{{ route('{$route}.edit', \${$singular}) }}"
+                                       class="inline-flex items-center px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition">
+                                        Edit
+                                    </a>
+                                    <button type="button" {$deleteBtn}
+                                            class="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-lg hover:bg-red-100 transition">
+                                        Delete
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        @empty
+                        <tr>
+                            <td colspan="99" class="px-6 py-16 text-center">
+                                <div class="text-gray-300 text-4xl mb-3">○</div>
+                                <p class="text-gray-500 font-medium">No {$title} yet.</p>
+                                <a href="{{ route('{$route}.create') }}" class="mt-2 inline-block text-indigo-500 text-sm hover:underline">
+                                    Create the first one →
+                                </a>
+                            </td>
+                        </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+
+                @if(\${$plural}->hasPages())
+                <div class="px-6 py-4 border-t border-gray-100">
+                    {{ \${$plural}->links() }}
+                </div>
+                @endif
+            </div>
+
+{$modal}
+
+        </div>
+    </div>
+</x-app-layout>
+BLADE;
     }
 
-    public function generateShow(string $model, array $columns, array $relationships): string
-    {
-        $singular = Str::camel($model);
-        $route    = Str::kebab(Str::plural($model));
-        $title    = Str::headline($model);
-        $fields   = $this->showFields($singular, $columns);
-        $relSects = $this->relSections($singular, $relationships);
+    // ── Tailwind Show ─────────────────────────────────────────────────────────
 
-        return $this->fw() === 'tailwind'
-            ? $this->twShow($model, $singular, $route, $title, $fields, $relSects)
-            : $this->bsShow($model, $singular, $route, $title, $fields, $relSects);
+    private function twShow(string $model, array $columns, array $relationships): string
+    {
+        $singular  = Str::camel($model);
+        $route     = Str::kebab(Str::plural($model));
+        $title     = Str::headline($model);
+        $fields    = $this->twShowFields($singular, $columns);
+        $relSects  = $this->twRelSections($singular, $relationships);
+        $hasAlpine = $this->framework->hasAlpine();
+        $modal     = $hasAlpine ? $this->twDeleteModal($model) : '';
+        $deleteTrigger = $hasAlpine
+            ? "@click=\"showDeleteModal = true; deleteUrl = '{{ route('{$route}.destroy', \${$singular}) }}'\""
+            : "onclick=\"document.getElementById('delete-{$singular}-form').submit()\"";
+
+        return <<<BLADE
+<x-app-layout>
+    <x-slot name="header">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <a href="{{ route('{$route}.index') }}"
+                   class="text-gray-400 hover:text-gray-600 transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                </a>
+                <h2 class="text-xl font-semibold text-gray-800">{$title} Details</h2>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="{{ route('{$route}.edit', \${$singular}) }}"
+                   class="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                    Edit
+                </a>
+                <button type="button" {$deleteTrigger}
+                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    Delete
+                </button>
+                <form id="delete-{$singular}-form" action="{{ route('{$route}.destroy', \${$singular}) }}" method="POST" class="hidden">@csrf @method('DELETE')</form>
+            </div>
+        </div>
+    </x-slot>
+
+    <div class="py-12">
+        <div class="max-w-4xl mx-auto sm:px-6 lg:px-8 space-y-6">
+
+            @if(session('success'))
+                <div x-data="{ show: true }" x-show="show" x-transition
+                     x-init="setTimeout(() => show = false, 4000)"
+                     class="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-xl text-green-800 text-sm">
+                    <svg class="w-5 h-5 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                    {{ session('success') }}
+                </div>
+            @endif
+
+            {{-- Field values --}}
+            <div class="bg-white shadow-sm rounded-xl overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                    <h3 class="font-semibold text-gray-900">Details</h3>
+                    <span class="text-xs text-gray-400"># {{ \${$singular}->id }}</span>
+                </div>
+                <div class="p-6">
+                    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
+{$fields}
+                    </dl>
+                </div>
+            </div>
+
+{$relSects}
+
+{$modal}
+
+        </div>
+    </div>
+</x-app-layout>
+BLADE;
     }
 
-    public function generateCreate(string $model, array $columns, array $relationships): string
-    {
-        $singular = Str::camel($model);
-        $route    = Str::kebab(Str::plural($model));
-        $title    = 'Create ' . Str::headline($model);
-        $inputs   = $this->formInputs($columns, $relationships, null);
+    // ── Tailwind Form (create / edit) ─────────────────────────────────────────
 
-        return $this->fw() === 'tailwind'
-            ? $this->twForm($model, $singular, $route, $title, $inputs, 'create')
-            : $this->bsForm($model, $singular, $route, $title, $inputs, 'create');
+    private function twForm(string $model, array $columns, array $relationships, string $mode): string
+    {
+        $singular  = Str::camel($model);
+        $route     = Str::kebab(Str::plural($model));
+        $title     = ($mode === 'create' ? 'Create ' : 'Edit ') . Str::headline($model);
+        $action    = $mode === 'create'
+            ? "{{ route('{$route}.store') }}"
+            : "{{ route('{$route}.update', \${$singular}) }}";
+        $method    = $mode === 'edit' ? '@method(\'PUT\')' : '';
+        $inputs    = $this->twInputs($columns, $relationships, $mode === 'edit' ? $singular : null);
+
+        return <<<BLADE
+<x-app-layout>
+    <x-slot name="header">
+        <div class="flex items-center gap-3">
+            <a href="{{ route('{$route}.index') }}" class="text-gray-400 hover:text-gray-600 transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            </a>
+            <h2 class="text-xl font-semibold text-gray-800">{$title}</h2>
+        </div>
+    </x-slot>
+
+    <div class="py-12">
+        <div class="max-w-3xl mx-auto sm:px-6 lg:px-8">
+
+            @if(\$errors->any())
+                <div class="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+                    <p class="text-sm font-semibold text-red-800 mb-2 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.07 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                        Please fix the following errors
+                    </p>
+                    <ul class="list-disc list-inside text-sm text-red-700 space-y-0.5">
+                        @foreach(\$errors->all() as \$error)
+                            <li>{{ \$error }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
+
+            <div class="bg-white shadow-sm rounded-xl overflow-hidden" x-data="{ loading: false }">
+                <form action="{$action}" method="POST" @submit="loading = true" novalidate>
+                    @csrf
+                    {$method}
+
+                    <div class="p-6 space-y-6">
+{$inputs}
+                    </div>
+
+                    <div class="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                        <a href="{{ route('{$route}.index') }}"
+                           class="text-sm text-gray-500 hover:text-gray-700 transition">Cancel</a>
+
+                        <button type="submit" :disabled="loading"
+                                class="inline-flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition">
+                            <svg x-show="loading" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            <span x-show="!loading">Save {$model}</span>
+                            <span x-show="loading">Saving...</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</x-app-layout>
+BLADE;
     }
 
-    public function generateEdit(string $model, array $columns, array $relationships): string
+    // ── Bootstrap Index ───────────────────────────────────────────────────────
+
+    private function bsIndex(string $model, array $columns): string
     {
-        $singular = Str::camel($model);
-        $route    = Str::kebab(Str::plural($model));
-        $title    = 'Edit ' . Str::headline($model);
-        $inputs   = $this->formInputs($columns, $relationships, $singular);
+        $plural    = Str::camel(Str::plural($model));
+        $singular  = Str::camel($model);
+        $route     = Str::kebab(Str::plural($model));
+        $title     = Str::headline(Str::plural($model));
+        $cols      = $this->displayCols($columns);
+        $headers   = $this->bsHeaders($cols);
+        $cells     = $this->bsCells($singular, $cols);
+        $hasAlpine = $this->framework->hasAlpine();
 
-        return $this->fw() === 'tailwind'
-            ? $this->twForm($model, $singular, $route, $title, $inputs, 'edit')
-            : $this->bsForm($model, $singular, $route, $title, $inputs, 'edit');
-    }
+        $xData     = $hasAlpine ? 'x-data="{ search: \'\', deleteUrl: \'\', showDeleteModal: false }"' : '';
+        $rowShow   = $hasAlpine ? 'x-show="!search || $el.textContent.toLowerCase().includes(search.toLowerCase())"' : '';
+        $searchInput = $hasAlpine
+            ? '<input x-model="search" type="search" class="form-control w-auto" placeholder="Search...">'
+            : '<form class="d-inline"><input type="search" name="search" value="{{ request(\'search\') }}" class="form-control w-auto" placeholder="Search..."> <button class="btn btn-outline-secondary">Go</button></form>';
 
-    // ── Bootstrap templates ───────────────────────────────────────────────────
-
-    private function bsIndex(string $model, string $plural, string $singular, string $route, string $title, array $cols): string
-    {
-        $headers = collect($cols)->map(fn($c) => "                        <th>" . Str::headline($c['name']) . "</th>")->implode("\n");
-        $cells   = collect($cols)->map(fn($c) => "                        <td>{{ \${$singular}->{$c['name']} ?? '—' }}</td>")->implode("\n");
+        $modal = $this->bsDeleteModal($model);
 
         return <<<BLADE
 @extends('layouts.app')
 
 @section('content')
-<div class="container py-4">
+<div class="container py-4" {$xData}>
+
+    {{-- Toast --}}
+    @if(session('success'))
+    <div class="position-fixed top-0 end-0 p-3" style="z-index: 9999">
+        <div id="capyrelToast" class="toast show align-items-center text-bg-success border-0 rounded-3 shadow" role="alert">
+            <div class="d-flex">
+                <div class="toast-body fw-medium">✓ &nbsp;{{ session('success') }}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    </div>
+    @endif
+
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0">{$title}</h1>
-        <a href="{{ route('{$route}.create') }}" class="btn btn-primary">
-            <i class="bi bi-plus-lg"></i> New {$model}
+        <h1 class="h4 mb-0 fw-bold">{$title}</h1>
+        <a href="{{ route('{$route}.create') }}" class="btn btn-primary d-inline-flex align-items-center gap-2">
+            <svg class="bi" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
+            New {$model}
         </a>
     </div>
 
-    @if(session('success'))
-        <div class="alert alert-success alert-dismissible fade show">
-            {{ session('success') }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    @endif
+    <div class="mb-3 d-flex gap-2">
+        {$searchInput}
+    </div>
 
-    <div class="card shadow-sm border-0">
+    <div class="card border-0 shadow-sm rounded-3">
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0">
@@ -99,28 +382,26 @@ class FullBladeGenerator
                     </thead>
                     <tbody>
                         @forelse(\${$plural} as \${$singular})
-                        <tr>
+                        <tr {$rowShow}>
 {$cells}
                             <td class="text-end pe-4">
-                                <a href="{{ route('{$route}.show', \${$singular}) }}"
-                                   class="btn btn-sm btn-outline-primary">View</a>
-                                <a href="{{ route('{$route}.edit', \${$singular}) }}"
-                                   class="btn btn-sm btn-outline-secondary">Edit</a>
-                                <form action="{{ route('{$route}.destroy', \${$singular}) }}"
-                                      method="POST" class="d-inline"
-                                      onsubmit="return confirm('Delete this {$model}? This cannot be undone.')">
-                                    @csrf
-                                    @method('DELETE')
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                                </form>
+                                <div class="btn-group btn-group-sm">
+                                    <a href="{{ route('{$route}.show', \${$singular}) }}" class="btn btn-outline-secondary">View</a>
+                                    <a href="{{ route('{$route}.edit', \${$singular}) }}" class="btn btn-outline-secondary">Edit</a>
+                                    <button type="button" class="btn btn-outline-danger"
+                                            data-bs-toggle="modal" data-bs-target="#deleteModal"
+                                            onclick="document.getElementById('deleteForm').action='{{ route('{$route}.destroy', \${$singular}) }}'">
+                                        Delete
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="{{ count(\${$plural}->first() ? array_keys(\${$plural}->first()->toArray()) : [0]) + 1 }}"
-                                class="text-center text-muted py-5">
+                            <td colspan="99" class="text-center text-muted py-5">
+                                <div class="fs-1 mb-2 opacity-25">○</div>
                                 No {$title} found.
-                                <a href="{{ route('{$route}.create') }}">Create the first one.</a>
+                                <a href="{{ route('{$route}.create') }}" class="d-block mt-2">Create the first one</a>
                             </td>
                         </tr>
                         @endforelse
@@ -129,48 +410,85 @@ class FullBladeGenerator
             </div>
         </div>
         @if(\${$plural}->hasPages())
-        <div class="card-footer bg-white">
+        <div class="card-footer bg-white border-top-0">
             {{ \${$plural}->links() }}
         </div>
         @endif
     </div>
+
+{$modal}
+
 </div>
 @endsection
+
+@push('scripts')
+<script>
+// Auto-hide toast after 4 seconds
+document.addEventListener('DOMContentLoaded', function () {
+    var el = document.getElementById('capyrelToast');
+    if (el) setTimeout(function () {
+        bootstrap.Toast.getOrCreateInstance(el).hide();
+    }, 4000);
+});
+</script>
+@endpush
 BLADE;
     }
 
-    private function bsShow(string $model, string $singular, string $route, string $title, string $fields, string $relSects): string
+    // ── Bootstrap Show ────────────────────────────────────────────────────────
+
+    private function bsShow(string $model, array $columns, array $relationships): string
     {
+        $singular  = Str::camel($model);
+        $route     = Str::kebab(Str::plural($model));
+        $title     = Str::headline($model);
+        $fields    = $this->bsShowFields($singular, $columns);
+        $relSects  = $this->bsRelSections($singular, $relationships);
+        $modal     = $this->bsDeleteModal($model);
+
         return <<<BLADE
 @extends('layouts.app')
 
 @section('content')
 <div class="container py-4">
+
+    @if(session('success'))
+    <div class="position-fixed top-0 end-0 p-3" style="z-index: 9999">
+        <div id="capyrelToast" class="toast show align-items-center text-bg-success border-0 rounded-3 shadow">
+            <div class="d-flex">
+                <div class="toast-body fw-medium">✓ &nbsp;{{ session('success') }}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    </div>
+    @endif
+
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <a href="{{ route('{$route}.index') }}" class="text-muted text-decoration-none small">
-                ← All {$title}s
+        <div class="d-flex align-items-center gap-3">
+            <a href="{{ route('{$route}.index') }}" class="text-muted text-decoration-none">
+                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
             </a>
-            <h1 class="h3 mb-0 mt-1">{$title} Details</h1>
+            <h1 class="h4 mb-0 fw-bold">{$title}</h1>
+            <span class="text-muted small">#{{ \${$singular}->id }}</span>
         </div>
         <div class="d-flex gap-2">
-            <a href="{{ route('{$route}.edit', \${$singular}) }}" class="btn btn-warning">Edit</a>
-            <form action="{{ route('{$route}.destroy', \${$singular}) }}" method="POST"
-                  onsubmit="return confirm('Delete this {$model}?')">
-                @csrf @method('DELETE')
-                <button class="btn btn-danger">Delete</button>
-            </form>
+            <a href="{{ route('{$route}.edit', \${$singular}) }}" class="btn btn-outline-secondary d-inline-flex align-items-center gap-2">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                Edit
+            </a>
+            <button type="button" class="btn btn-danger d-inline-flex align-items-center gap-2"
+                    data-bs-toggle="modal" data-bs-target="#deleteModal"
+                    onclick="document.getElementById('deleteForm').action='{{ route('{$route}.destroy', \${$singular}) }}'">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                Delete
+            </button>
         </div>
     </div>
 
-    @if(session('success'))
-        <div class="alert alert-success alert-dismissible fade show">
-            {{ session('success') }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    <div class="card border-0 shadow-sm rounded-3 mb-4">
+        <div class="card-header bg-white border-bottom d-flex justify-content-between">
+            <span class="fw-semibold">Details</span>
         </div>
-    @endif
-
-    <div class="card shadow-sm border-0 mb-4">
         <div class="card-body">
             <dl class="row mb-0">
 {$fields}
@@ -179,17 +497,35 @@ BLADE;
     </div>
 
 {$relSects}
+
+{$modal}
+
 </div>
 @endsection
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var el = document.getElementById('capyrelToast');
+    if (el) setTimeout(function () { bootstrap.Toast.getOrCreateInstance(el).hide(); }, 4000);
+});
+</script>
+@endpush
 BLADE;
     }
 
-    private function bsForm(string $model, string $singular, string $route, string $title, string $inputs, string $mode): string
+    // ── Bootstrap Form ────────────────────────────────────────────────────────
+
+    private function bsForm(string $model, array $columns, array $relationships, string $mode): string
     {
-        $action = $mode === 'create'
+        $singular = Str::camel($model);
+        $route    = Str::kebab(Str::plural($model));
+        $title    = ($mode === 'create' ? 'Create ' : 'Edit ') . Str::headline($model);
+        $action   = $mode === 'create'
             ? "{{ route('{$route}.store') }}"
             : "{{ route('{$route}.update', \${$singular}) }}";
-        $method = $mode === 'edit' ? "@method('PUT')" : '';
+        $method   = $mode === 'edit' ? '@method(\'PUT\')' : '';
+        $inputs   = $this->bsInputs($columns, $relationships, $mode === 'edit' ? $singular : null);
 
         return <<<BLADE
 @extends('layouts.app')
@@ -197,35 +533,43 @@ BLADE;
 @section('content')
 <div class="container py-4">
     <div class="row justify-content-center">
-        <div class="col-md-8 col-lg-7">
-            <div class="d-flex align-items-center mb-4">
-                <a href="{{ route('{$route}.index') }}" class="text-muted me-3">←</a>
-                <h1 class="h3 mb-0">{$title}</h1>
+        <div class="col-lg-8">
+            <div class="d-flex align-items-center gap-3 mb-4">
+                <a href="{{ route('{$route}.index') }}" class="text-muted text-decoration-none">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                </a>
+                <h1 class="h4 mb-0 fw-bold">{$title}</h1>
             </div>
 
             @if(\$errors->any())
-                <div class="alert alert-danger">
-                    <strong>Please fix the following errors:</strong>
-                    <ul class="mb-0 mt-2">
-                        @foreach(\$errors->all() as \$error)
-                            <li>{{ \$error }}</li>
-                        @endforeach
-                    </ul>
+                <div class="alert alert-danger rounded-3 d-flex gap-3">
+                    <svg class="flex-shrink-0" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                    <div>
+                        <strong>Please fix these errors:</strong>
+                        <ul class="mb-0 mt-1 ps-3">
+                            @foreach(\$errors->all() as \$error)
+                                <li class="small">{{ \$error }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
                 </div>
             @endif
 
-            <div class="card shadow-sm border-0">
+            <div class="card border-0 shadow-sm rounded-3">
                 <div class="card-body p-4">
-                    <form action="{$action}" method="POST" novalidate>
+                    <form action="{$action}" method="POST" novalidate
+                          onsubmit="this.querySelector('[type=submit]').disabled=true; this.querySelector('.btn-spinner').classList.remove('d-none'); this.querySelector('.btn-text').classList.add('d-none');">
                         @csrf
                         {$method}
 
 {$inputs}
 
-                        <div class="d-flex justify-content-between align-items-center pt-3 mt-3 border-top">
+                        <hr class="my-4">
+                        <div class="d-flex justify-content-between align-items-center">
                             <a href="{{ route('{$route}.index') }}" class="btn btn-light">Cancel</a>
-                            <button type="submit" class="btn btn-primary px-4">
-                                Save {$model}
+                            <button type="submit" class="btn btn-primary px-4 d-inline-flex align-items-center gap-2">
+                                <span class="btn-spinner spinner-border spinner-border-sm d-none"></span>
+                                <span class="btn-text">Save {$model}</span>
                             </button>
                         </div>
                     </form>
@@ -238,197 +582,83 @@ BLADE;
 BLADE;
     }
 
-    // ── Tailwind templates ────────────────────────────────────────────────────
+    // ── Modals ────────────────────────────────────────────────────────────────
 
-    private function twIndex(string $model, string $plural, string $singular, string $route, string $title, array $cols): string
-    {
-        $headers = collect($cols)->map(fn($c) => "                            <th scope=\"col\" class=\"px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">" . Str::headline($c['name']) . "</th>")->implode("\n");
-        $cells   = collect($cols)->map(fn($c) => "                            <td class=\"px-6 py-4 whitespace-nowrap text-sm text-gray-900\">{{ \${$singular}->{$c['name']} ?? '—' }}</td>")->implode("\n");
-
-        return <<<BLADE
-<x-app-layout>
-    <x-slot name="header">
-        <div class="flex items-center justify-between">
-            <h2 class="text-xl font-semibold text-gray-800">{$title}</h2>
-            <a href="{{ route('{$route}.create') }}"
-               class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition">
-                + New {$model}
-            </a>
-        </div>
-    </x-slot>
-
-    <div class="py-12">
-        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
-
-            @if(session('success'))
-                <div class="mb-4 p-4 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
-                    {{ session('success') }}
-                </div>
-            @endif
-
-            <div class="bg-white shadow-sm rounded-xl overflow-hidden">
-                <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
-                        <tr>
-{$headers}
-                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-100">
-                        @forelse(\${$plural} as \${$singular})
-                        <tr class="hover:bg-gray-50 transition">
-{$cells}
-                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                                <a href="{{ route('{$route}.show', \${$singular}) }}"
-                                   class="text-indigo-600 hover:text-indigo-900">View</a>
-                                <a href="{{ route('{$route}.edit', \${$singular}) }}"
-                                   class="text-yellow-600 hover:text-yellow-900">Edit</a>
-                                <form action="{{ route('{$route}.destroy', \${$singular}) }}" method="POST"
-                                      class="inline" onsubmit="return confirm('Delete this {$model}?')">
-                                    @csrf @method('DELETE')
-                                    <button type="submit" class="text-red-600 hover:text-red-900">Delete</button>
-                                </form>
-                            </td>
-                        </tr>
-                        @empty
-                        <tr>
-                            <td colspan="99" class="px-6 py-10 text-center text-gray-400">
-                                No {$title} yet.
-                                <a href="{{ route('{$route}.create') }}" class="text-indigo-500 hover:underline ml-1">Create one.</a>
-                            </td>
-                        </tr>
-                        @endforelse
-                    </tbody>
-                </table>
-                @if(\${$plural}->hasPages())
-                <div class="px-6 py-4 border-t border-gray-100">
-                    {{ \${$plural}->links() }}
-                </div>
-                @endif
-            </div>
-        </div>
-    </div>
-</x-app-layout>
-BLADE;
-    }
-
-    private function twShow(string $model, string $singular, string $route, string $title, string $fields, string $relSects): string
+    private function twDeleteModal(string $model): string
     {
         return <<<BLADE
-<x-app-layout>
-    <x-slot name="header">
-        <div class="flex items-center justify-between">
-            <div>
-                <a href="{{ route('{$route}.index') }}" class="text-sm text-gray-500 hover:text-gray-700">← All {$title}s</a>
-                <h2 class="text-xl font-semibold text-gray-800 mt-1">{$title} Details</h2>
-            </div>
-            <div class="flex gap-3">
-                <a href="{{ route('{$route}.edit', \${$singular}) }}"
-                   class="px-4 py-2 bg-yellow-500 text-white text-sm rounded-lg hover:bg-yellow-600">Edit</a>
-                <form action="{{ route('{$route}.destroy', \${$singular}) }}" method="POST"
-                      onsubmit="return confirm('Delete this {$model}?')">
-                    @csrf @method('DELETE')
-                    <button class="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">Delete</button>
-                </form>
-            </div>
-        </div>
-    </x-slot>
-
-    <div class="py-12">
-        <div class="max-w-4xl mx-auto sm:px-6 lg:px-8 space-y-6">
-
-            @if(session('success'))
-                <div class="p-4 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">
-                    {{ session('success') }}
-                </div>
-            @endif
-
-            <div class="bg-white shadow-sm rounded-xl overflow-hidden">
-                <div class="px-6 py-4 border-b border-gray-100">
-                    <h3 class="font-medium text-gray-900">Information</h3>
-                </div>
-                <div class="p-6">
-                    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-{$fields}
-                    </dl>
-                </div>
-            </div>
-
-{$relSects}
-
-        </div>
-    </div>
-</x-app-layout>
-BLADE;
-    }
-
-    private function twForm(string $model, string $singular, string $route, string $title, string $inputs, string $mode): string
-    {
-        $action = $mode === 'create'
-            ? "{{ route('{$route}.store') }}"
-            : "{{ route('{$route}.update', \${$singular}) }}";
-        $method = $mode === 'edit' ? "@method('PUT')" : '';
-
-        return <<<BLADE
-<x-app-layout>
-    <x-slot name="header">
-        <div class="flex items-center gap-3">
-            <a href="{{ route('{$route}.index') }}" class="text-gray-400 hover:text-gray-600">←</a>
-            <h2 class="text-xl font-semibold text-gray-800">{$title}</h2>
-        </div>
-    </x-slot>
-
-    <div class="py-12">
-        <div class="max-w-3xl mx-auto sm:px-6 lg:px-8">
-
-            @if(\$errors->any())
-                <div class="mb-6 p-4 rounded-xl bg-red-50 border border-red-200">
-                    <p class="font-medium text-red-800 text-sm mb-2">Please fix the following errors:</p>
-                    <ul class="list-disc list-inside text-red-700 text-sm space-y-1">
-                        @foreach(\$errors->all() as \$error)
-                            <li>{{ \$error }}</li>
-                        @endforeach
-                    </ul>
-                </div>
-            @endif
-
-            <div class="bg-white shadow-sm rounded-xl overflow-hidden">
-                <form action="{$action}" method="POST" novalidate>
-                    @csrf
-                    {$method}
-                    <div class="p-6 space-y-5">
-
-{$inputs}
-
+            {{-- Delete Confirmation Modal --}}
+            <div x-show="showDeleteModal" x-transition:enter="transition ease-out duration-200"
+                 x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+                 class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+                 @keydown.escape.window="showDeleteModal = false">
+                <div x-show="showDeleteModal"
+                     x-transition:enter="transition ease-out duration-200"
+                     x-transition:enter-start="opacity-0 scale-95"
+                     x-transition:enter-end="opacity-100 scale-100"
+                     @click.stop
+                     class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="flex-shrink-0 w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                            <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.07 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-gray-900">Delete {$model}</h3>
+                            <p class="text-sm text-gray-500 mt-0.5">This action cannot be undone.</p>
+                        </div>
                     </div>
-                    <div class="px-6 py-4 bg-gray-50 border-t flex items-center justify-between">
-                        <a href="{{ route('{$route}.index') }}"
-                           class="text-sm text-gray-500 hover:text-gray-700">Cancel</a>
-                        <button type="submit"
-                                class="px-6 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition">
-                            Save {$model}
+                    <div class="flex gap-3 mt-6">
+                        <button @click="showDeleteModal = false"
+                                class="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition">
+                            Cancel
                         </button>
+                        <form :action="deleteUrl" method="POST" class="flex-1">
+                            @csrf @method('DELETE')
+                            <button type="submit"
+                                    class="w-full px-4 py-2.5 text-sm font-medium text-white bg-red-600 rounded-xl hover:bg-red-700 transition">
+                                Yes, Delete
+                            </button>
+                        </form>
                     </div>
-                </form>
+                </div>
             </div>
-        </div>
-    </div>
-</x-app-layout>
 BLADE;
     }
 
-    // ── Field & input builders ────────────────────────────────────────────────
-
-    private function displayColumns(array $columns): array
+    private function bsDeleteModal(string $model): string
     {
-        $skip = ['password', 'remember_token', 'two_factor_secret', '_id', 'deleted_at'];
-        return array_values(array_filter(
-            array_slice($columns, 0, 6),
-            fn($c) => !in_array($c['name'], $skip)
-        ));
+        return <<<BLADE
+{{-- Delete Confirmation Modal --}}
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow rounded-4">
+            <div class="modal-body p-4">
+                <div class="d-flex align-items-center gap-3 mb-3">
+                    <div class="flex-shrink-0 bg-danger bg-opacity-10 rounded-circle d-flex align-items-center justify-content-center" style="width:40px;height:40px">
+                        <svg width="20" height="20" fill="none" stroke="#dc3545" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.07 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                    </div>
+                    <div>
+                        <h6 class="mb-0 fw-bold">Delete {$model}?</h6>
+                        <p class="text-muted small mb-0">This cannot be undone.</p>
+                    </div>
+                </div>
+                <div class="d-flex gap-2 mt-4">
+                    <button type="button" class="btn btn-light flex-fill" data-bs-dismiss="modal">Cancel</button>
+                    <form id="deleteForm" method="POST" class="flex-fill">
+                        @csrf @method('DELETE')
+                        <button type="submit" class="btn btn-danger w-100">Yes, Delete</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+BLADE;
     }
 
-    private function showFields(string $singular, array $columns): string
+    // ── Field renderers ───────────────────────────────────────────────────────
+
+    private function twShowFields(string $singular, array $columns): string
     {
         $skip  = ['password', 'remember_token', 'two_factor_secret', '_id'];
         $lines = [];
@@ -437,31 +667,110 @@ BLADE;
             $name  = $col['name'];
             if (in_array($name, $skip)) continue;
             $label = Str::headline($name);
+            $type  = $col['type_name'] ?? 'string';
 
-            // Format timestamps and booleans nicely
-            $value = in_array($col['type_name'] ?? '', ['datetime', 'timestamp', 'date'])
-                ? "{{ \${$singular}->{$name}?->format('d M Y H:i') ?? '—' }}"
-                : "{{ \${$singular}->{$name} ?? '—' }}";
-
-            if ($this->fw() === 'tailwind') {
+            if (in_array($type, ['datetime', 'timestamp'])) {
+                $value = "{{ \${$singular}->{$name}?->format('d M Y, H:i') ?? '—' }}";
+            } elseif ($type === 'date') {
+                $value = "{{ \${$singular}->{$name}?->format('d M Y') ?? '—' }}";
+            } elseif (in_array($type, ['boolean', 'bool', 'tinyint'])) {
+                $value = "\${$singular}->{$name} ? '<span class=\"inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800\">Yes</span>' : '<span class=\"inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500\">No</span>'";
                 $lines[] = <<<BLADE
                         <div>
-                            <dt class="text-xs font-medium text-gray-500 uppercase tracking-wide">{$label}</dt>
-                            <dd class="mt-1 text-sm text-gray-900">{$value}</dd>
+                            <dt class="text-xs font-medium text-gray-400 uppercase tracking-wide">{$label}</dt>
+                            <dd class="mt-1.5 text-sm text-gray-900">{!! {$value} !!}</dd>
                         </div>
 BLADE;
+                continue;
             } else {
-                $lines[] = <<<BLADE
-                <dt class="col-sm-3 text-muted fw-semibold">{$label}</dt>
-                <dd class="col-sm-9">{$value}</dd>
-BLADE;
+                $value = "{{ \${$singular}->{$name} ?? '—' }}";
             }
+
+            $lines[] = <<<BLADE
+                        <div>
+                            <dt class="text-xs font-medium text-gray-400 uppercase tracking-wide">{$label}</dt>
+                            <dd class="mt-1.5 text-sm text-gray-900 break-words">{$value}</dd>
+                        </div>
+BLADE;
         }
 
         return implode("\n", $lines);
     }
 
-    private function formInputs(array $columns, array $relationships, ?string $singular): string
+    private function bsShowFields(string $singular, array $columns): string
+    {
+        $skip  = ['password', 'remember_token', 'two_factor_secret', '_id'];
+        $lines = [];
+
+        foreach ($columns as $col) {
+            $name  = $col['name'];
+            if (in_array($name, $skip)) continue;
+            $label = Str::headline($name);
+            $type  = $col['type_name'] ?? 'string';
+
+            if (in_array($type, ['datetime', 'timestamp'])) {
+                $value = "{{ \${$singular}->{$name}?->format('d M Y, H:i') ?? '—' }}";
+            } elseif ($type === 'date') {
+                $value = "{{ \${$singular}->{$name}?->format('d M Y') ?? '—' }}";
+            } elseif (in_array($type, ['boolean', 'bool', 'tinyint'])) {
+                $value = "\${$singular}->{$name} ? '<span class=\"badge bg-success-subtle text-success\">Yes</span>' : '<span class=\"badge bg-secondary-subtle text-secondary\">No</span>'";
+                $lines[] = <<<BLADE
+                <dt class="col-sm-3 text-muted small fw-semibold text-uppercase">{$label}</dt>
+                <dd class="col-sm-9">{!! {$value} !!}</dd>
+BLADE;
+                continue;
+            } else {
+                $value = "{{ \${$singular}->{$name} ?? '—' }}";
+            }
+
+            $lines[] = <<<BLADE
+                <dt class="col-sm-3 text-muted small fw-semibold text-uppercase">{$label}</dt>
+                <dd class="col-sm-9">{$value}</dd>
+BLADE;
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function twHeaders(array $cols): string
+    {
+        return collect($cols)->map(fn($c) =>
+            "                            <th class=\"px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider\">" . Str::headline($c['name']) . "</th>"
+        )->implode("\n");
+    }
+
+    private function twCells(string $singular, array $cols): string
+    {
+        return collect($cols)->map(fn($c) =>
+            "                            <td class=\"px-6 py-4 whitespace-nowrap text-sm text-gray-900\">{{ \${$singular}->{$c['name']} ?? '—' }}</td>"
+        )->implode("\n");
+    }
+
+    private function bsHeaders(array $cols): string
+    {
+        return collect($cols)->map(fn($c) =>
+            "                            <th>" . Str::headline($c['name']) . "</th>"
+        )->implode("\n");
+    }
+
+    private function bsCells(string $singular, array $cols): string
+    {
+        return collect($cols)->map(fn($c) =>
+            "                            <td>{{ \${$singular}->{$c['name']} ?? '—' }}</td>"
+        )->implode("\n");
+    }
+
+    private function twInputs(array $columns, array $relationships, ?string $singular): string
+    {
+        return $this->buildInputs($columns, $relationships, $singular, 'tailwind');
+    }
+
+    private function bsInputs(array $columns, array $relationships, ?string $singular): string
+    {
+        return $this->buildInputs($columns, $relationships, $singular, 'bootstrap');
+    }
+
+    private function buildInputs(array $columns, array $relationships, ?string $singular, string $fw): string
     {
         $skip  = ['id', '_id', 'created_at', 'updated_at', 'deleted_at', 'remember_token', 'email_verified_at'];
         $lines = [];
@@ -470,201 +779,211 @@ BLADE;
             $name = $col['name'];
             if (in_array($name, $skip)) continue;
 
-            // FK column → <select> from relationship
             if (str_ends_with($name, '_id')) {
-                $rel = $this->findRelationshipForFk($name, $relationships);
-                $lines[] = $rel
-                    ? $this->selectInput($name, $rel, $singular)
-                    : $this->buildInput($name, $col, $singular);
-                continue;
+                $rel = $this->findBelongsToRel($name, $relationships);
+                if ($rel) {
+                    $lines[] = $this->selectField($name, $rel, $singular, $fw);
+                    continue;
+                }
             }
 
-            $lines[] = $this->buildInput($name, $col, $singular);
+            $lines[] = $this->inputField($name, $col, $singular, $fw);
         }
 
-        // belongsToMany checkboxes
         foreach ($relationships as $rel) {
             if ($rel['type'] !== 'belongsToMany') continue;
-            $lines[] = $this->checkboxGroup($rel, $singular);
+            $lines[] = $this->checkboxGroupField($rel, $singular, $fw);
         }
 
         return implode("\n\n", $lines);
     }
 
-    private function buildInput(string $name, array $col, ?string $singular): string
+    private function inputField(string $name, array $col, ?string $singular, string $fw): string
     {
         $label    = Str::headline($name);
         $type     = $this->inputType($name, $col['type_name'] ?? 'string');
         $rawType  = strtolower($col['type_name'] ?? 'string');
-        $oldVal   = $singular
-            ? "{{ old('{$name}', \${$singular}->{$name}) }}"
-            : "{{ old('{$name}') }}";
-
-        if ($type === 'textarea' || in_array($rawType, ['text', 'longtext', 'mediumtext'])) {
-            return $this->textareaField($name, $label, $oldVal, $singular);
-        }
+        $oldVal   = $singular ? "{{ old('{$name}', \${$singular}->{$name}) }}" : "{{ old('{$name}') }}";
+        $nullable = $col['nullable'] ?? false;
+        $required = $nullable ? '' : 'required';
 
         if ($type === 'checkbox') {
-            return $this->checkboxField($name, $label, $singular);
+            return $fw === 'tailwind'
+                ? $this->twCheckbox($name, $label, $singular)
+                : $this->bsCheckbox($name, $label, $singular);
         }
 
-        return $this->inputField($name, $label, $type, $oldVal);
+        if (in_array($rawType, ['text', 'longtext', 'mediumtext'])) {
+            $content = $singular ? "{{ old('{$name}', \${$singular}->{$name}) }}" : "{{ old('{$name}') }}";
+            return $fw === 'tailwind'
+                ? $this->twTextarea($name, $label, $content, $required)
+                : $this->bsTextarea($name, $label, $content, $required);
+        }
+
+        return $fw === 'tailwind'
+            ? $this->twInput($name, $label, $type, $oldVal, $required)
+            : $this->bsInput($name, $label, $type, $oldVal, $required);
     }
 
-    private function inputField(string $name, string $label, string $type, string $oldVal): string
+    private function twInput(string $name, string $label, string $type, string $val, string $req): string
     {
-        if ($this->fw() === 'tailwind') {
-            return <<<BLADE
+        return <<<BLADE
                         <div>
-                            <label for="{$name}" class="block text-sm font-medium text-gray-700 mb-1">{$label}</label>
-                            <input type="{$type}" id="{$name}" name="{$name}" value="{$oldVal}"
-                                   class="block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500 @error('{$name}') border-red-400 bg-red-50 @enderror">
+                            <label for="{$name}" class="block text-sm font-medium text-gray-700 mb-1.5">
+                                {$label} @if('{$req}' === 'required') <span class="text-red-500">*</span> @endif
+                            </label>
+                            <input type="{$type}" id="{$name}" name="{$name}" value="{$val}" {$req}
+                                   class="block w-full rounded-xl border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500 transition @error('{$name}') border-red-400 bg-red-50 ring-2 ring-red-200 @enderror">
                             @error('{$name}')
-                                <p class="mt-1 text-xs text-red-600">{{ \$message }}</p>
+                                <p class="mt-1.5 text-xs text-red-600 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                                    {{ \$message }}
+                                </p>
                             @enderror
                         </div>
 BLADE;
-        }
+    }
 
+    private function bsInput(string $name, string $label, string $type, string $val, string $req): string
+    {
         return <<<BLADE
                         <div class="mb-4">
-                            <label for="{$name}" class="form-label fw-semibold">{$label}</label>
-                            <input type="{$type}" id="{$name}" name="{$name}" value="{$oldVal}"
-                                   class="form-control @error('{$name}') is-invalid @enderror">
+                            <label for="{$name}" class="form-label fw-semibold small">
+                                {$label} @if('{$req}' === 'required') <span class="text-danger">*</span> @endif
+                            </label>
+                            <input type="{$type}" id="{$name}" name="{$name}" value="{$val}" {$req}
+                                   class="form-control rounded-3 @error('{$name}') is-invalid @enderror">
                             @error('{$name}')
-                                <div class="invalid-feedback">{{ \$message }}</div>
+                                <div class="invalid-feedback d-flex align-items-center gap-1">
+                                    <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                                    {{ \$message }}
+                                </div>
                             @enderror
                         </div>
 BLADE;
     }
 
-    private function textareaField(string $name, string $label, string $oldVal, ?string $singular): string
+    private function twTextarea(string $name, string $label, string $content, string $req): string
     {
-        $content = $singular
-            ? "{{ old('{$name}', \${$singular}->{$name}) }}"
-            : "{{ old('{$name}') }}";
-
-        if ($this->fw() === 'tailwind') {
-            return <<<BLADE
+        return <<<BLADE
                         <div>
-                            <label for="{$name}" class="block text-sm font-medium text-gray-700 mb-1">{$label}</label>
-                            <textarea id="{$name}" name="{$name}" rows="4"
-                                      class="block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500 @error('{$name}') border-red-400 bg-red-50 @enderror">{$content}</textarea>
-                            @error('{$name}')
-                                <p class="mt-1 text-xs text-red-600">{{ \$message }}</p>
-                            @enderror
+                            <label for="{$name}" class="block text-sm font-medium text-gray-700 mb-1.5">
+                                {$label} @if('{$req}' === 'required') <span class="text-red-500">*</span> @endif
+                            </label>
+                            <textarea id="{$name}" name="{$name}" rows="5" {$req}
+                                      class="block w-full rounded-xl border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500 transition @error('{$name}') border-red-400 bg-red-50 @enderror">{$content}</textarea>
+                            @error('{$name}') <p class="mt-1.5 text-xs text-red-600">{{ \$message }}</p> @enderror
                         </div>
 BLADE;
-        }
+    }
 
+    private function bsTextarea(string $name, string $label, string $content, string $req): string
+    {
         return <<<BLADE
                         <div class="mb-4">
-                            <label for="{$name}" class="form-label fw-semibold">{$label}</label>
-                            <textarea id="{$name}" name="{$name}" rows="4"
-                                      class="form-control @error('{$name}') is-invalid @enderror">{$content}</textarea>
-                            @error('{$name}')
-                                <div class="invalid-feedback">{{ \$message }}</div>
-                            @enderror
+                            <label for="{$name}" class="form-label fw-semibold small">{$label}</label>
+                            <textarea id="{$name}" name="{$name}" rows="5" {$req}
+                                      class="form-control rounded-3 @error('{$name}') is-invalid @enderror">{$content}</textarea>
+                            @error('{$name}') <div class="invalid-feedback">{{ \$message }}</div> @enderror
                         </div>
 BLADE;
     }
 
-    private function checkboxField(string $name, string $label, ?string $singular): string
+    private function twCheckbox(string $name, string $label, ?string $singular): string
     {
         $checked = $singular ? "{{ old('{$name}', \${$singular}->{$name}) ? 'checked' : '' }}" : "{{ old('{$name}') ? 'checked' : '' }}";
-
-        if ($this->fw() === 'tailwind') {
-            return <<<BLADE
-                        <div class="flex items-center gap-3">
-                            <input type="hidden" name="{$name}" value="0">
-                            <input type="checkbox" id="{$name}" name="{$name}" value="1" {$checked}
-                                   class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+        return <<<BLADE
+                        <div class="flex items-start gap-3">
+                            <div class="flex items-center h-5 mt-0.5">
+                                <input type="hidden" name="{$name}" value="0">
+                                <input type="checkbox" id="{$name}" name="{$name}" value="1" {$checked}
+                                       class="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                            </div>
                             <label for="{$name}" class="text-sm font-medium text-gray-700">{$label}</label>
                         </div>
 BLADE;
-        }
+    }
 
+    private function bsCheckbox(string $name, string $label, ?string $singular): string
+    {
+        $checked = $singular ? "{{ old('{$name}', \${$singular}->{$name}) ? 'checked' : '' }}" : "{{ old('{$name}') ? 'checked' : '' }}";
         return <<<BLADE
                         <div class="mb-4 form-check">
                             <input type="hidden" name="{$name}" value="0">
                             <input type="checkbox" id="{$name}" name="{$name}" value="1" {$checked}
-                                   class="form-check-input @error('{$name}') is-invalid @enderror">
-                            <label for="{$name}" class="form-check-label fw-semibold">{$label}</label>
+                                   class="form-check-input">
+                            <label for="{$name}" class="form-check-label fw-semibold small">{$label}</label>
                         </div>
 BLADE;
     }
 
-    private function selectInput(string $fkColumn, array $rel, ?string $singular): string
+    private function selectField(string $fkCol, array $rel, ?string $singular, string $fw): string
     {
-        $label       = Str::headline(Str::beforeLast($fkColumn, '_id'));
-        $related     = $rel['related'];
-        $relatedVar  = Str::camel(Str::plural($related));
-        $relatedItem = Str::camel(Str::singular($related));
-        $selected    = $singular
-            ? "{{ old('{$fkColumn}', \${$singular}->{$fkColumn}) == \${$relatedItem}->id ? 'selected' : '' }}"
-            : "{{ old('{$fkColumn}') == \${$relatedItem}->id ? 'selected' : '' }}";
+        $label      = Str::headline(Str::beforeLast($fkCol, '_id'));
+        $related    = $rel['related'];
+        $relatedVar = Str::camel(Str::plural($related));
+        $relItem    = Str::camel(Str::singular($related));
+        $selected   = $singular
+            ? "{{ old('{$fkCol}', \${$singular}->{$fkCol}) == \${$relItem}->id ? 'selected' : '' }}"
+            : "{{ old('{$fkCol}') == \${$relItem}->id ? 'selected' : '' }}";
 
-        if ($this->fw() === 'tailwind') {
+        if ($fw === 'tailwind') {
             return <<<BLADE
                         <div>
-                            <label for="{$fkColumn}" class="block text-sm font-medium text-gray-700 mb-1">{$label}</label>
-                            <select id="{$fkColumn}" name="{$fkColumn}"
-                                    class="block w-full rounded-lg border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500 @error('{$fkColumn}') border-red-400 @enderror">
-                                <option value="">-- Select {$label} --</option>
-                                @foreach(\${$relatedVar} as \${$relatedItem})
-                                    <option value="{{ \${$relatedItem}->id }}" {$selected}>
-                                        {{ \${$relatedItem}->name ?? \${$relatedItem}->title ?? \${$relatedItem}->id }}
+                            <label for="{$fkCol}" class="block text-sm font-medium text-gray-700 mb-1.5">{$label}</label>
+                            <select id="{$fkCol}" name="{$fkCol}"
+                                    class="block w-full rounded-xl border-gray-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500 @error('{$fkCol}') border-red-400 @enderror">
+                                <option value="">— Select {$label} —</option>
+                                @foreach(\${$relatedVar} as \${$relItem})
+                                    <option value="{{ \${$relItem}->id }}" {$selected}>
+                                        {{ \${$relItem}->name ?? \${$relItem}->title ?? \${$relItem}->id }}
                                     </option>
                                 @endforeach
                             </select>
-                            @error('{$fkColumn}')
-                                <p class="mt-1 text-xs text-red-600">{{ \$message }}</p>
-                            @enderror
+                            @error('{$fkCol}') <p class="mt-1.5 text-xs text-red-600">{{ \$message }}</p> @enderror
                         </div>
 BLADE;
         }
 
         return <<<BLADE
                         <div class="mb-4">
-                            <label for="{$fkColumn}" class="form-label fw-semibold">{$label}</label>
-                            <select id="{$fkColumn}" name="{$fkColumn}"
-                                    class="form-select @error('{$fkColumn}') is-invalid @enderror">
-                                <option value="">-- Select {$label} --</option>
-                                @foreach(\${$relatedVar} as \${$relatedItem})
-                                    <option value="{{ \${$relatedItem}->id }}" {$selected}>
-                                        {{ \${$relatedItem}->name ?? \${$relatedItem}->title ?? \${$relatedItem}->id }}
+                            <label for="{$fkCol}" class="form-label fw-semibold small">{$label}</label>
+                            <select id="{$fkCol}" name="{$fkCol}"
+                                    class="form-select rounded-3 @error('{$fkCol}') is-invalid @enderror">
+                                <option value="">— Select {$label} —</option>
+                                @foreach(\${$relatedVar} as \${$relItem})
+                                    <option value="{{ \${$relItem}->id }}" {$selected}>
+                                        {{ \${$relItem}->name ?? \${$relItem}->title ?? \${$relItem}->id }}
                                     </option>
                                 @endforeach
                             </select>
-                            @error('{$fkColumn}')
-                                <div class="invalid-feedback">{{ \$message }}</div>
-                            @enderror
+                            @error('{$fkCol}') <div class="invalid-feedback">{{ \$message }}</div> @enderror
                         </div>
 BLADE;
     }
 
-    private function checkboxGroup(array $rel, ?string $singular): string
+    private function checkboxGroupField(array $rel, ?string $singular, string $fw): string
     {
-        $method      = $rel['method'];
-        $related     = $rel['related'];
-        $relatedVar  = Str::camel(Str::plural($related));
-        $relatedItem = Str::camel(Str::singular($related));
-        $label       = Str::headline($method);
-        $checked     = $singular
-            ? "{{ in_array(\${$relatedItem}->id, old('{$method}_ids', \${$singular}->{$method}->pluck('id')->toArray())) ? 'checked' : '' }}"
-            : "{{ in_array(\${$relatedItem}->id, old('{$method}_ids', [])) ? 'checked' : '' }}";
+        $method     = $rel['method'];
+        $related    = $rel['related'];
+        $relatedVar = Str::camel(Str::plural($related));
+        $relItem    = Str::camel(Str::singular($related));
+        $label      = Str::headline($method);
+        $checked    = $singular
+            ? "{{ in_array(\${$relItem}->id, old('{$method}_ids', \${$singular}->{$method}->pluck('id')->toArray())) ? 'checked' : '' }}"
+            : "{{ in_array(\${$relItem}->id, old('{$method}_ids', [])) ? 'checked' : '' }}";
 
-        if ($this->fw() === 'tailwind') {
+        if ($fw === 'tailwind') {
             return <<<BLADE
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-2">{$label}</label>
                             <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                @foreach(\${$relatedVar} as \${$relatedItem})
-                                    <label class="flex items-center gap-2 p-2 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
-                                        <input type="checkbox" name="{$method}_ids[]" value="{{ \${$relatedItem}->id }}" {$checked}
-                                               class="h-4 w-4 rounded border-gray-300 text-indigo-600">
+                                @foreach(\${$relatedVar} as \${$relItem})
+                                    <label class="flex items-center gap-2.5 p-3 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/50 cursor-pointer transition has-[:checked]:border-indigo-400 has-[:checked]:bg-indigo-50">
+                                        <input type="checkbox" name="{$method}_ids[]" value="{{ \${$relItem}->id }}" {$checked}
+                                               class="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                                         <span class="text-sm text-gray-700">
-                                            {{ \${$relatedItem}->name ?? \${$relatedItem}->title ?? \${$relatedItem}->id }}
+                                            {{ \${$relItem}->name ?? \${$relItem}->title ?? \${$relItem}->id }}
                                         </span>
                                     </label>
                                 @endforeach
@@ -675,18 +994,15 @@ BLADE;
 
         return <<<BLADE
                         <div class="mb-4">
-                            <label class="form-label fw-semibold d-block">{$label}</label>
+                            <label class="form-label fw-semibold small d-block">{$label}</label>
                             <div class="row g-2">
-                                @foreach(\${$relatedVar} as \${$relatedItem})
+                                @foreach(\${$relatedVar} as \${$relItem})
                                     <div class="col-6 col-md-4">
-                                        <div class="form-check border rounded p-2">
-                                            <input type="checkbox" class="form-check-input"
-                                                   name="{$method}_ids[]" value="{{ \${$relatedItem}->id }}" {$checked}
-                                                   id="{$method}_{{ \${$relatedItem}->id }}">
-                                            <label class="form-check-label" for="{$method}_{{ \${$relatedItem}->id }}">
-                                                {{ \${$relatedItem}->name ?? \${$relatedItem}->title ?? \${$relatedItem}->id }}
-                                            </label>
-                                        </div>
+                                        <label class="d-flex align-items-center gap-2 p-2 border rounded-3 cursor-pointer hover-bg-light">
+                                            <input type="checkbox" class="form-check-input mt-0"
+                                                   name="{$method}_ids[]" value="{{ \${$relItem}->id }}" {$checked}>
+                                            <span class="small">{{ \${$relItem}->name ?? \${$relItem}->title ?? \${$relItem}->id }}</span>
+                                        </label>
                                     </div>
                                 @endforeach
                             </div>
@@ -694,7 +1010,9 @@ BLADE;
 BLADE;
     }
 
-    private function relSections(string $singular, array $relationships): string
+    // ── Relationship sections ─────────────────────────────────────────────────
+
+    private function twRelSections(string $singular, array $relationships): string
     {
         $sections = [];
 
@@ -705,120 +1023,131 @@ BLADE;
             $related = $rel['related'];
             $title   = Str::headline($method);
             $item    = Str::camel(Str::singular($related));
-            $relRoute = Str::kebab(Str::plural($related));
 
             if (in_array($rel['type'], ['hasMany', 'belongsToMany', 'hasManyThrough'])) {
-                if ($this->fw() === 'tailwind') {
-                    $sections[] = <<<BLADE
+                $sections[] = <<<BLADE
             <div class="bg-white shadow-sm rounded-xl overflow-hidden">
-                <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
-                    <h3 class="font-medium text-gray-900">{$title}</h3>
-                    <span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">
+                <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                    <h3 class="font-semibold text-gray-900">{$title}</h3>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
                         {{ \${$singular}->{$method}->count() }}
                     </span>
                 </div>
                 <div class="divide-y divide-gray-50">
                     @forelse(\${$singular}->{$method} as \${$item})
-                        <div class="px-6 py-3 flex justify-between items-center hover:bg-gray-50">
+                        <div class="px-6 py-3 flex items-center justify-between hover:bg-gray-50 transition">
                             <span class="text-sm text-gray-900">
                                 {{ \${$item}->name ?? \${$item}->title ?? '#' . \${$item}->id }}
                             </span>
                         </div>
                     @empty
-                        <div class="px-6 py-4 text-sm text-gray-400">No {$title} yet.</div>
+                        <div class="px-6 py-6 text-center text-sm text-gray-400">
+                            No {$title} yet.
+                        </div>
                     @endforelse
                 </div>
             </div>
 BLADE;
-                } else {
-                    $sections[] = <<<BLADE
-    <div class="card shadow-sm border-0 mb-4">
-        <div class="card-header bg-white d-flex justify-content-between align-items-center">
-            <strong>{$title}</strong>
-            <span class="badge bg-secondary">{{ \${$singular}->{$method}->count() }}</span>
-        </div>
-        <ul class="list-group list-group-flush">
-            @forelse(\${$singular}->{$method} as \${$item})
-                <li class="list-group-item d-flex justify-content-between align-items-center">
-                    {{ \${$item}->name ?? \${$item}->title ?? '#' . \${$item}->id }}
-                </li>
-            @empty
-                <li class="list-group-item text-muted">No {$title} yet.</li>
-            @endforelse
-        </ul>
-    </div>
-BLADE;
-                }
             } else {
-                if ($this->fw() === 'tailwind') {
-                    $sections[] = <<<BLADE
+                $sections[] = <<<BLADE
             <div class="bg-white shadow-sm rounded-xl overflow-hidden">
                 <div class="px-6 py-4 border-b border-gray-100">
-                    <h3 class="font-medium text-gray-900">{$title}</h3>
+                    <h3 class="font-semibold text-gray-900">{$title}</h3>
                 </div>
-                <div class="px-6 py-4">
+                <div class="px-6 py-4 text-sm text-gray-900">
                     @if(\${$singular}->{$method})
-                        <span class="text-sm text-gray-900">
-                            {{ \${$singular}->{$method}->name ?? \${$singular}->{$method}->title ?? '#' . \${$singular}->{$method}->id }}
-                        </span>
+                        {{ \${$singular}->{$method}->name ?? \${$singular}->{$method}->title ?? '#' . \${$singular}->{$method}->id }}
                     @else
-                        <span class="text-sm text-gray-400">None.</span>
+                        <span class="text-gray-400">None.</span>
                     @endif
                 </div>
             </div>
 BLADE;
-                } else {
-                    $sections[] = <<<BLADE
-    <div class="card shadow-sm border-0 mb-4">
-        <div class="card-header bg-white"><strong>{$title}</strong></div>
-        <div class="card-body">
-            @if(\${$singular}->{$method})
-                {{ \${$singular}->{$method}->name ?? \${$singular}->{$method}->title ?? '#' . \${$singular}->{$method}->id }}
-            @else
-                <span class="text-muted">None.</span>
-            @endif
-        </div>
-    </div>
-BLADE;
-                }
             }
         }
 
         return implode("\n\n", $sections);
     }
 
+    private function bsRelSections(string $singular, array $relationships): string
+    {
+        $sections = [];
+
+        foreach ($relationships as $rel) {
+            if (empty($rel['related']) || $rel['type'] === 'morphTo') continue;
+
+            $method  = $rel['method'];
+            $related = $rel['related'];
+            $title   = Str::headline($method);
+            $item    = Str::camel(Str::singular($related));
+
+            if (in_array($rel['type'], ['hasMany', 'belongsToMany', 'hasManyThrough'])) {
+                $sections[] = <<<BLADE
+<div class="card border-0 shadow-sm rounded-3 mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <span class="fw-semibold">{$title}</span>
+        <span class="badge bg-secondary-subtle text-secondary rounded-pill">{{ \${$singular}->{$method}->count() }}</span>
+    </div>
+    <ul class="list-group list-group-flush">
+        @forelse(\${$singular}->{$method} as \${$item})
+            <li class="list-group-item d-flex justify-content-between align-items-center py-3">
+                <span class="small">{{ \${$item}->name ?? \${$item}->title ?? '#' . \${$item}->id }}</span>
+            </li>
+        @empty
+            <li class="list-group-item text-muted text-center py-4 small">No {$title} yet.</li>
+        @endforelse
+    </ul>
+</div>
+BLADE;
+            } else {
+                $sections[] = <<<BLADE
+<div class="card border-0 shadow-sm rounded-3 mb-4">
+    <div class="card-header bg-white fw-semibold">{$title}</div>
+    <div class="card-body small">
+        @if(\${$singular}->{$method})
+            {{ \${$singular}->{$method}->name ?? \${$singular}->{$method}->title ?? '#' . \${$singular}->{$method}->id }}
+        @else
+            <span class="text-muted">None.</span>
+        @endif
+    </div>
+</div>
+BLADE;
+            }
+        }
+
+        return implode("\n", $sections);
+    }
+
     // ── Utilities ─────────────────────────────────────────────────────────────
 
-    private function fw(): string
+    private function isTw(): bool { return $this->framework->isTailwind(); }
+
+    private function displayCols(array $columns): array
     {
-        return $this->framework->detect();
+        $skip = ['password', 'remember_token', 'two_factor_secret', '_id', 'deleted_at'];
+        return array_values(array_filter(array_slice($columns, 0, 5), fn($c) => !in_array($c['name'], $skip)));
     }
 
     private function inputType(string $name, string $type): string
     {
-        if (str_contains($name, 'email'))                               return 'email';
-        if ($name === 'password' || str_ends_with($name, '_password'))  return 'password';
-        if (str_contains($name, 'url') || $name === 'website')          return 'url';
-        if (str_ends_with($name, '_at') || $type === 'date')            return 'date';
-        if (in_array($type, ['datetime', 'timestamp']))                  return 'datetime-local';
-        if (in_array($type, ['int', 'integer', 'bigint', 'smallint']))   return 'number';
-        if (in_array($type, ['decimal', 'float', 'double', 'numeric'])) return 'number';
-        if (in_array($type, ['boolean', 'tinyint', 'bool']))             return 'checkbox';
-        if (in_array($type, ['text', 'longtext', 'mediumtext']))         return 'textarea';
+        if (str_contains($name, 'email'))                                return 'email';
+        if ($name === 'password' || str_ends_with($name, '_password'))   return 'password';
+        if (str_contains($name, 'url') || $name === 'website')           return 'url';
+        if (str_ends_with($name, '_at') || $type === 'date')             return 'date';
+        if (in_array($type, ['datetime', 'timestamp']))                   return 'datetime-local';
+        if (in_array($type, ['int', 'integer', 'bigint', 'smallint']))    return 'number';
+        if (in_array($type, ['decimal', 'float', 'double', 'numeric']))  return 'number';
+        if (in_array($type, ['boolean', 'tinyint', 'bool']))              return 'checkbox';
         return 'text';
     }
 
-    private function findRelationshipForFk(string $fkColumn, array $relationships): ?array
+    private function findBelongsToRel(string $fkCol, array $relationships): ?array
     {
         foreach ($relationships as $rel) {
-            if ($rel['type'] === 'belongsTo' && ($rel['foreign_key'] ?? '') === $fkColumn) {
-                return $rel;
-            }
-            // fallback: guess from column name
-            $guessedModel = Str::studly(Str::beforeLast($fkColumn, '_id'));
-            if ($rel['type'] === 'belongsTo' && $rel['related'] === $guessedModel) {
-                return $rel;
-            }
+            if ($rel['type'] !== 'belongsTo') continue;
+            if (($rel['foreign_key'] ?? '') === $fkCol) return $rel;
+            $guessed = Str::studly(Str::beforeLast($fkCol, '_id'));
+            if ($rel['related'] === $guessed) return $rel;
         }
         return null;
     }

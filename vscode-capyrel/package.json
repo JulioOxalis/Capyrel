@@ -4,7 +4,6 @@
     "description": "Capyrel integration for VS Code: run scaffold commands, get relationship snippets, and view your model map.",
     "version": "1.0.0",
     "publisher": "JulioOxalis",
-    "icon": "icon.png",
     "repository": {
         "type": "git",
         "url": "https://github.com/JulioOxalis/Capyrel"

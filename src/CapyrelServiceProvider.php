@@ -18,6 +18,7 @@ use Julio\Capyrel\Analyzers\OrphanForeignKeyAnalyzer;
 use Julio\Capyrel\Analyzers\SchemaFillableDriftAnalyzer;
 use Julio\Capyrel\Analyzers\SoftDeleteAnalyzer;
 use Julio\Capyrel\Commands\DemoCommand;
+use Julio\Capyrel\Commands\InstallExtensionCommand;
 use Julio\Capyrel\Detectors\FrameworkDetector;
 use Julio\Capyrel\Commands\MapCommand;
 use Julio\Capyrel\Commands\RequestsCommand;
@@ -98,8 +99,9 @@ class CapyrelServiceProvider extends ServiceProvider
                 SafeMigrateCommand::class,
                 WatchCommand::class,
 
-                // Demo
+                // Demo + extension
                 DemoCommand::class,
+                InstallExtensionCommand::class,
             ]);
         }
     }

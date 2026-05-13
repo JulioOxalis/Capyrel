@@ -14,34 +14,40 @@ class FullBladeGenerator
 {
     public function __construct(private FrameworkDetector $framework) {}
 
+    /**
+     * Stamped at the top of every generated blade file.
+     * CleanCommand searches for this to identify and remove generated views.
+     */
+    private string $stamp = "{{-- capyrel:generated — remove with: php artisan capyrel:clean --views --}}\n";
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     public function generateIndex(string $model, array $columns): string
     {
-        return $this->isTw()
+        return $this->stamp . ($this->isTw()
             ? $this->twIndex($model, $columns)
-            : $this->bsIndex($model, $columns);
+            : $this->bsIndex($model, $columns));
     }
 
     public function generateShow(string $model, array $columns, array $relationships): string
     {
-        return $this->isTw()
+        return $this->stamp . ($this->isTw()
             ? $this->twShow($model, $columns, $relationships)
-            : $this->bsShow($model, $columns, $relationships);
+            : $this->bsShow($model, $columns, $relationships));
     }
 
     public function generateCreate(string $model, array $columns, array $relationships): string
     {
-        return $this->isTw()
+        return $this->stamp . ($this->isTw()
             ? $this->twForm($model, $columns, $relationships, 'create')
-            : $this->bsForm($model, $columns, $relationships, 'create');
+            : $this->bsForm($model, $columns, $relationships, 'create'));
     }
 
     public function generateEdit(string $model, array $columns, array $relationships): string
     {
-        return $this->isTw()
+        return $this->stamp . ($this->isTw()
             ? $this->twForm($model, $columns, $relationships, 'edit')
-            : $this->bsForm($model, $columns, $relationships, 'edit');
+            : $this->bsForm($model, $columns, $relationships, 'edit'));
     }
 
     // ── Tailwind + Alpine.js Index (modal-first) ─────────────────────────────

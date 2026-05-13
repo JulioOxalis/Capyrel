@@ -687,3 +687,12 @@ php artisan model:tests         # Pest relationship tests
 php artisan model:livewire      # Livewire table (live search) + form components
 php artisan capyrel:audit       # full health report → CAPYREL_AUDIT.md
 php artisan capyrel:clean       # remove all generated code
+
+# Update capyrel to latest version
+composer update julio/capyrel
+
+# Remove ALL generated files/code first (clean your project)
+php artisan capyrel:clean
+
+# Then remove the package itself
+composer remove julio/capyrel

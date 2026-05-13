@@ -246,6 +246,37 @@ PHP;
 PHP;
         }
 
+        // scopeSearch — for any model with searchable text columns
+        $searchCols = array_filter($names, fn($n) => in_array($n, ['name', 'title', 'email', 'username', 'body', 'content', 'description', 'slug']));
+        if (!empty($searchCols) && !str_contains($content, 'scopeSearch')) {
+            $whereClauses = collect($searchCols)->map(fn($c) => "\n                ->orWhere('{$c}', 'like', \"%{\$term}%\")")->implode('');
+            $scopes .= <<<PHP
+
+    // capyrel: full-text search scope — use: Model::search('keyword')->get()
+    public function scopeSearch(\$query, string \$term)
+    {
+        return \$query->where(function (\$q) use (\$term) {
+            \$q->where('id', '<', 0){$whereClauses};
+        });
+    }
+
+PHP;
+        }
+
+        // Full name accessor — first_name + last_name
+        $hasFirstLast = in_array('first_name', $names) && in_array('last_name', $names);
+        if ($hasFirstLast && !str_contains($content, 'full_name') && !str_contains($content, 'getFullName')) {
+            $scopes .= <<<PHP
+
+    // capyrel: computed accessor — use: \$model->full_name
+    public function getFullNameAttribute(): string
+    {
+        return trim(\$this->first_name . ' ' . \$this->last_name);
+    }
+
+PHP;
+        }
+
         return $scopes;
     }
 

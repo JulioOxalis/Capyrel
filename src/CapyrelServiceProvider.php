@@ -20,12 +20,17 @@ use Julio\Capyrel\Analyzers\SoftDeleteAnalyzer;
 use Julio\Capyrel\Commands\AuditCommand;
 use Julio\Capyrel\Commands\CleanCommand;
 use Julio\Capyrel\Commands\DemoCommand;
+use Julio\Capyrel\Commands\EnumCommand;
+use Julio\Capyrel\Commands\EventsCommand;
 use Julio\Capyrel\Commands\FactoryCommand;
+use Julio\Capyrel\Commands\FullstackCommand;
 use Julio\Capyrel\Commands\InstallExtensionCommand;
+use Julio\Capyrel\Commands\LivewireCommand;
 use Julio\Capyrel\Commands\OptimizeCommand;
 use Julio\Capyrel\Commands\PolicyCommand;
 use Julio\Capyrel\Commands\SeedCommand;
 use Julio\Capyrel\Detectors\FrameworkDetector;
+use Julio\Capyrel\Detectors\ModelContextClassifier;
 use Julio\Capyrel\Commands\MapCommand;
 use Julio\Capyrel\Commands\RequestsCommand;
 use Julio\Capyrel\Commands\ResourcesCommand;
@@ -34,9 +39,12 @@ use Julio\Capyrel\Commands\ScaffoldCommand;
 use Julio\Capyrel\Commands\TestsCommand;
 use Julio\Capyrel\Commands\WatchCommand;
 use Julio\Capyrel\Generators\ApiResourceGenerator;
+use Julio\Capyrel\Generators\EnumGenerator;
+use Julio\Capyrel\Generators\EventGenerator;
 use Julio\Capyrel\Generators\FactoryGenerator;
 use Julio\Capyrel\Generators\FormRequestGenerator;
 use Julio\Capyrel\Generators\FullBladeGenerator;
+use Julio\Capyrel\Generators\LivewireGenerator;
 use Julio\Capyrel\Generators\PolicyGenerator;
 use Julio\Capyrel\Generators\RelationMethodGenerator;
 use Julio\Capyrel\Generators\RelationshipTestGenerator;
@@ -58,6 +66,7 @@ class CapyrelServiceProvider extends ServiceProvider
 
         // Detectors
         $this->app->singleton(FrameworkDetector::class);
+        $this->app->singleton(ModelContextClassifier::class);
 
         // Generators
         $this->app->singleton(RelationMethodGenerator::class);
@@ -68,6 +77,9 @@ class CapyrelServiceProvider extends ServiceProvider
         $this->app->singleton(FactoryGenerator::class);
         $this->app->singleton(PolicyGenerator::class);
         $this->app->singleton(SeederGenerator::class);
+        $this->app->singleton(EnumGenerator::class);
+        $this->app->singleton(EventGenerator::class);
+        $this->app->singleton(LivewireGenerator::class);
 
         // Writers
         $this->app->singleton(ModelWriter::class);
@@ -116,6 +128,12 @@ class CapyrelServiceProvider extends ServiceProvider
                 PolicyCommand::class,
                 SeedCommand::class,
                 OptimizeCommand::class,
+                EnumCommand::class,
+                EventsCommand::class,
+                LivewireCommand::class,
+
+                // One-command fullstack
+                FullstackCommand::class,
 
                 // Audit + clean
                 AuditCommand::class,

@@ -7,6 +7,69 @@ use Illuminate\Support\Str;
 class ControllerWriter
 {
     /**
+     * Generate a nested resource controller for DEPENDENT models (Comment under Post, etc).
+     * The parent is injected via route model binding — FK is set automatically.
+     */
+    public function generateNested(string $modelName, string $parentModel, string $parentFk, array $columns = []): string
+    {
+        $variable    = Str::camel($modelName);
+        $parentVar   = Str::camel($parentModel);
+        $viewPrefix  = Str::kebab(Str::plural($parentModel)) . '.' . Str::kebab(Str::plural($modelName));
+        $parentRoute = Str::kebab(Str::plural($parentModel));
+        $storeRules  = $this->inlineRules($columns, [], 'store');
+        $updateRules = $this->inlineRules($columns, [], 'update');
+
+        return <<<PHP
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\\{$modelName};
+use App\Models\\{$parentModel};
+use Illuminate\Http\Request;
+
+// capyrel: nested controller — {$modelName} always belongs to {$parentModel}
+class {$modelName}Controller extends Controller
+{
+    public function store(Request \$request, {$parentModel} \${$parentVar})
+    {
+        \$validated = \$request->validate([
+{$storeRules}
+        ]);
+
+        \$validated['{$parentFk}'] = \${$parentVar}->id;
+        \${$variable} = {$modelName}::create(\$validated);
+
+        return back()->with('success', '{$modelName} added.');
+    }
+
+    public function edit({$parentModel} \${$parentVar}, {$modelName} \${$variable})
+    {
+        return view('{$viewPrefix}.edit', compact('{$parentVar}', '{$variable}'));
+    }
+
+    public function update(Request \$request, {$parentModel} \${$parentVar}, {$modelName} \${$variable})
+    {
+        \$validated = \$request->validate([
+{$updateRules}
+        ]);
+
+        \${$variable}->update(\$validated);
+
+        return back()->with('success', '{$modelName} updated.');
+    }
+
+    public function destroy({$parentModel} \${$parentVar}, {$modelName} \${$variable})
+    {
+        \${$variable}->delete();
+
+        return back()->with('success', '{$modelName} deleted.');
+    }
+}
+PHP;
+    }
+
+    /**
      * Generate a full resource controller with inline validation and relationship awareness.
      * Uses $request->validate([...]) — works without FormRequest, no validated() crash.
      */

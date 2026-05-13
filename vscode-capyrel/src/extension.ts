@@ -5,41 +5,32 @@ import * as fs from 'fs';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getWorkspaceRoot(): string | undefined {
+function getRoot(): string | undefined {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
-function isLaravelProject(root: string): boolean {
+function isLaravel(root: string): boolean {
     return fs.existsSync(path.join(root, 'artisan'));
 }
 
-function runInTerminal(command: string, terminalName: string = 'Capyrel'): void {
-    const root = getWorkspaceRoot();
-    if (!root) {
-        vscode.window.showErrorMessage('No workspace folder open.');
-        return;
-    }
-    if (!isLaravelProject(root)) {
-        vscode.window.showErrorMessage('No Laravel artisan file found. Open a Laravel project first.');
-        return;
-    }
+/** Run an artisan command in the shared "Capyrel" terminal. */
+function run(command: string, terminalName = 'Capyrel'): void {
+    const root = getRoot();
+    if (!root) { vscode.window.showErrorMessage('No workspace folder open.'); return; }
+    if (!isLaravel(root)) { vscode.window.showErrorMessage('No artisan file found. Open a Laravel project first.'); return; }
 
-    // Reuse existing Capyrel terminal if open
     let terminal = vscode.window.terminals.find(t => t.name === terminalName);
     if (!terminal) {
-        terminal = vscode.window.createTerminal({
-            name: terminalName,
-            cwd: root,
-        });
+        terminal = vscode.window.createTerminal({ name: terminalName, cwd: root });
     }
-
     terminal.show();
     terminal.sendText(command);
 }
 
-function runAndCapture(command: string): Promise<string> {
-    const root = getWorkspaceRoot() ?? process.cwd();
+/** Run a command and capture output (for sidebar refresh). */
+function capture(command: string): Promise<string> {
     return new Promise((resolve, reject) => {
+        const root = getRoot() ?? process.cwd();
         cp.exec(command, { cwd: root }, (err, stdout, stderr) => {
             if (err) reject(stderr || err.message);
             else resolve(stdout);
@@ -47,230 +38,217 @@ function runAndCapture(command: string): Promise<string> {
     });
 }
 
-// ── Commands ──────────────────────────────────────────────────────────────────
+// ── Command handlers ──────────────────────────────────────────────────────────
 
-async function scaffoldDryRun(): Promise<void> {
-    runInTerminal('php artisan model:scaffold --dry-run');
-}
+async function scaffoldDryRun() { run('php artisan model:scaffold --dry-run'); }
 
-async function scaffoldWrite(): Promise<void> {
-    const choice = await vscode.window.showWarningMessage(
-        'Capyrel will write to model files, generate controllers, blade pages, and routes. Continue?',
-        'Yes, scaffold',
-        'Cancel'
+async function scaffoldWrite() {
+    const ok = await vscode.window.showWarningMessage(
+        'Capyrel will write models, controllers, blade pages, and routes. Continue?',
+        'Yes, scaffold', 'Cancel'
     );
-    if (choice === 'Yes, scaffold') {
-        runInTerminal('php artisan model:scaffold');
-    }
+    if (ok === 'Yes, scaffold') run('php artisan model:scaffold');
 }
 
-async function showMap(): Promise<void> {
-    runInTerminal('php artisan model:map');
+async function fullstack() {
+    const ok = await vscode.window.showWarningMessage(
+        'capyrel:fullstack runs all 12 scaffold steps. Continue?',
+        'Yes, run fullstack', 'Cancel'
+    );
+    if (ok === 'Yes, run fullstack') run('php artisan capyrel:fullstack');
 }
 
-async function exportMermaid(): Promise<void> {
-    const root = getWorkspaceRoot();
-    if (!root) return;
-
-    try {
-        vscode.window.showInformationMessage('Generating Mermaid diagram…');
-        const output = await runAndCapture('php artisan model:map --format=mermaid --save=docs/capyrel-schema.md');
-
-        const docPath = path.join(root, 'docs', 'capyrel-schema.md');
-        if (fs.existsSync(docPath)) {
-            const doc = await vscode.workspace.openTextDocument(docPath);
-            await vscode.window.showTextDocument(doc);
-            vscode.window.showInformationMessage('Mermaid diagram saved to docs/capyrel-schema.md');
-        } else {
-            vscode.window.showInformationMessage('Mermaid diagram generated. Check terminal output.');
-            runInTerminal('php artisan model:map --format=mermaid');
-        }
-    } catch (e) {
-        runInTerminal('php artisan model:map --format=mermaid');
-    }
+async function showMap()     { run('php artisan model:map'); }
+async function mermaidMap()  {
+    run('php artisan model:map --format=mermaid --save=docs/capyrel-schema.md');
+    vscode.window.showInformationMessage('Diagram saved to docs/capyrel-schema.md');
 }
 
-async function generateResources(): Promise<void> {
-    const model = await vscode.window.showInputBox({
-        prompt: 'Model name (leave blank for all)',
-        placeHolder: 'User  — or leave empty for all models',
-    });
-    const cmd = model ? `php artisan model:resources ${model} --dry-run` : 'php artisan model:resources --dry-run';
-    const action = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files'], {
-        placeHolder: 'Preview first or write immediately?',
-    });
-    if (!action) return;
-    const flag = action === 'Write files' ? '' : ' --dry-run';
-    runInTerminal(`php artisan model:resources${model ? ' ' + model : ''}${flag}`);
+async function genResources() {
+    const model = await vscode.window.showInputBox({ prompt: 'Model name (blank = all)', placeHolder: 'User' });
+    const mode  = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files']);
+    if (!mode) return;
+    run(`php artisan model:resources${model ? ' '+model : ''}${mode.includes('Preview') ? ' --dry-run' : ''}`);
 }
 
-async function generateRequests(): Promise<void> {
-    const model = await vscode.window.showInputBox({
-        prompt: 'Model name (leave blank for all)',
-        placeHolder: 'Post  — or leave empty for all models',
-    });
-    const action = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files'], {
-        placeHolder: 'Preview first or write immediately?',
-    });
-    if (!action) return;
-    const flag = action === 'Write files' ? '' : ' --dry-run';
-    runInTerminal(`php artisan model:requests${model ? ' ' + model : ''}${flag}`);
+async function genRequests() {
+    const model = await vscode.window.showInputBox({ prompt: 'Model name (blank = all)', placeHolder: 'Post' });
+    const mode  = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files']);
+    if (!mode) return;
+    run(`php artisan model:requests${model ? ' '+model : ''}${mode.includes('Preview') ? ' --dry-run' : ''}`);
 }
 
-async function generateTests(): Promise<void> {
-    const model = await vscode.window.showInputBox({
-        prompt: 'Model name (leave blank for all)',
-        placeHolder: 'User  — or leave empty for all models',
-    });
-    const action = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files'], {
-        placeHolder: 'Preview first or write immediately?',
-    });
-    if (!action) return;
-    const flag = action === 'Write files' ? '' : ' --dry-run';
-    runInTerminal(`php artisan model:tests${model ? ' ' + model : ''}${flag}`);
+async function genTests() {
+    const model = await vscode.window.showInputBox({ prompt: 'Model name (blank = all)', placeHolder: 'User' });
+    const mode  = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files']);
+    if (!mode) return;
+    run(`php artisan model:tests${model ? ' '+model : ''}${mode.includes('Preview') ? ' --dry-run' : ''}`);
 }
 
-async function migrateSafe(): Promise<void> {
-    runInTerminal('php artisan migrate:safe --check');
+async function genFactory() {
+    const model = await vscode.window.showInputBox({ prompt: 'Model name (blank = all)', placeHolder: 'User' });
+    const mode  = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files']);
+    if (!mode) return;
+    run(`php artisan model:factory${model ? ' '+model : ''}${mode.includes('Preview') ? ' --dry-run' : ''}`);
 }
 
-async function startWatch(): Promise<void> {
-    runInTerminal('php artisan model:watch', 'Capyrel Watch');
+async function genPolicy() {
+    const model = await vscode.window.showInputBox({ prompt: 'Model name (blank = all)', placeHolder: 'Post' });
+    const mode  = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files']);
+    if (!mode) return;
+    run(`php artisan model:policy${model ? ' '+model : ''}${mode.includes('Preview') ? ' --dry-run' : ''}`);
 }
 
-async function runDemo(): Promise<void> {
-    runInTerminal('php artisan capyrel:demo');
+async function genSeed() {
+    const count = await vscode.window.showInputBox({ prompt: 'Records per model', placeHolder: '10', value: '10' });
+    const mode  = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files']);
+    if (!mode) return;
+    run(`php artisan model:seed --count=${count || '10'}${mode.includes('Preview') ? ' --dry-run' : ''}`);
 }
 
-// ── Relationship tree view ────────────────────────────────────────────────────
+async function optimizeModels() {
+    const model = await vscode.window.showInputBox({ prompt: 'Model name (blank = all)', placeHolder: 'User' });
+    run(`php artisan model:optimize${model ? ' '+model : ''} --dry-run`);
+}
 
-class RelationshipItem extends vscode.TreeItem {
+async function genLivewire() {
+    const model = await vscode.window.showInputBox({ prompt: 'Model name (blank = all)', placeHolder: 'User' });
+    const mode  = await vscode.window.showQuickPick(['Preview (dry-run)', 'Write files']);
+    if (!mode) return;
+    run(`php artisan model:livewire${model ? ' '+model : ''}${mode.includes('Preview') ? ' --dry-run' : ''}`);
+}
+
+async function genEnum() {
+    const model = await vscode.window.showInputBox({ prompt: 'Model name (blank = all)', placeHolder: 'Post' });
+    run(`php artisan model:enum${model ? ' '+model : ''} --dry-run`);
+}
+
+async function genEvents() {
+    const model = await vscode.window.showInputBox({ prompt: 'Model name (blank = all)', placeHolder: 'Post' });
+    run(`php artisan model:events${model ? ' '+model : ''} --dry-run`);
+}
+
+async function migrateSafe() { run('php artisan migrate:safe --check'); }
+
+async function runAudit()    { run('php artisan capyrel:audit'); }
+
+async function cleanFiles() {
+    const ok = await vscode.window.showWarningMessage(
+        'capyrel:clean removes all generated controllers, blade views, and routes. Continue?',
+        'Yes, clean', 'Cancel'
+    );
+    if (ok === 'Yes, clean') run('php artisan capyrel:clean');
+}
+
+async function startWatch()  { run('php artisan model:watch', 'Capyrel Watch'); }
+async function runDemo()     { run('php artisan capyrel:demo'); }
+
+// ── Relationship sidebar ──────────────────────────────────────────────────────
+
+class RelItem extends vscode.TreeItem {
     constructor(
-        public readonly label: string,
-        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-        public readonly description?: string,
-        public readonly iconPath?: vscode.ThemeIcon,
+        label: string,
+        collapsible: vscode.TreeItemCollapsibleState,
+        description?: string,
+        icon?: vscode.ThemeIcon
     ) {
-        super(label, collapsibleState);
+        super(label, collapsible);
         if (description) this.description = description;
-        if (iconPath) this.iconPath = iconPath;
+        if (icon) this.iconPath = icon;
     }
 }
 
-class RelationshipProvider implements vscode.TreeDataProvider<RelationshipItem> {
-    private _onDidChangeTreeData = new vscode.EventEmitter<RelationshipItem | undefined>();
-    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-
-    private data: Record<string, Array<{ type: string; related: string; via: string }>> = {};
+class RelProvider implements vscode.TreeDataProvider<RelItem> {
+    private _change = new vscode.EventEmitter<RelItem | undefined>();
+    readonly onDidChangeTreeData = this._change.event;
+    private data: Record<string, {type:string; related:string}[]> = {};
 
     async refresh(): Promise<void> {
         try {
-            const raw = await runAndCapture('php artisan model:map 2>/dev/null');
-            this.data = this.parse(raw);
-        } catch {
-            this.data = {};
-        }
-        this._onDidChangeTreeData.fire(undefined);
+            const out = await capture('php artisan model:map 2>&1');
+            this.data = this.parse(out);
+        } catch { this.data = {}; }
+        this._change.fire(undefined);
     }
 
-    private parse(output: string): Record<string, any[]> {
-        const result: Record<string, any[]> = {};
-        let current = '';
-
-        for (const line of output.split('\n')) {
-            const modelMatch = line.match(/^\s{2}([A-Z][A-Za-z]+)\s*$/);
-            if (modelMatch) {
-                current = modelMatch[1];
-                result[current] = [];
-                continue;
-            }
-            if (current) {
-                const relMatch = line.match(/[├└]── (\w+)\s+──▶\s+(\w+)(?:\s+\(via ([^)]+)\))?/);
-                if (relMatch) {
-                    result[current].push({
-                        type: relMatch[1].trim(),
-                        related: relMatch[2].trim(),
-                        via: relMatch[3] ?? '',
-                    });
-                }
+    private parse(out: string): Record<string, {type:string; related:string}[]> {
+        const r: Record<string, {type:string; related:string}[]> = {};
+        let cur = '';
+        for (const line of out.split('\n')) {
+            const m = line.match(/^\s{2}([A-Z][A-Za-z]+)\s*$/);
+            if (m) { cur = m[1]; r[cur] = []; continue; }
+            if (cur) {
+                const rel = line.match(/[├└]── (\w+)\s+──▶\s+(\w+)/);
+                if (rel) r[cur].push({ type: rel[1].trim(), related: rel[2].trim() });
             }
         }
-
-        return result;
+        return r;
     }
 
-    getTreeItem(element: RelationshipItem): vscode.TreeItem {
-        return element;
-    }
+    getTreeItem(el: RelItem) { return el; }
 
-    getChildren(element?: RelationshipItem): RelationshipItem[] {
-        if (!element) {
-            return Object.keys(this.data).map(model =>
-                new RelationshipItem(
-                    model,
-                    vscode.TreeItemCollapsibleState.Collapsed,
-                    `${this.data[model].length} relationship(s)`,
-                    new vscode.ThemeIcon('symbol-class')
-                )
+    getChildren(el?: RelItem): RelItem[] {
+        if (!el) {
+            return Object.keys(this.data).map(m =>
+                new RelItem(m, vscode.TreeItemCollapsibleState.Collapsed,
+                    `${this.data[m].length} rel`, new vscode.ThemeIcon('symbol-class'))
             );
         }
-
-        const rels = this.data[element.label as string] ?? [];
-        return rels.map(r =>
-            new RelationshipItem(
-                r.related || '(polymorphic)',
-                vscode.TreeItemCollapsibleState.None,
-                r.type + (r.via ? ` — ${r.via}` : ''),
-                new vscode.ThemeIcon(this.iconFor(r.type))
-            )
+        return (this.data[el.label as string] ?? []).map(r =>
+            new RelItem(r.related || '(poly)', vscode.TreeItemCollapsibleState.None,
+                r.type, new vscode.ThemeIcon(iconFor(r.type)))
         );
     }
+}
 
-    private iconFor(type: string): string {
-        const map: Record<string, string> = {
-            hasOne: 'arrow-right',
-            hasMany: 'list-tree',
-            belongsTo: 'arrow-left',
-            belongsToMany: 'git-merge',
-            hasManyThrough: 'type-hierarchy-sub',
-            morphTo: 'symbol-interface',
-            morphMany: 'symbol-interface',
-        };
-        return map[type] ?? 'symbol-field';
-    }
+function iconFor(t: string): string {
+    return ({ hasOne:'arrow-right', hasMany:'list-tree', belongsTo:'arrow-left',
+              belongsToMany:'git-merge', hasManyThrough:'type-hierarchy-sub',
+              morphTo:'symbol-interface', morphMany:'symbol-interface' } as any)[t] ?? 'symbol-field';
 }
 
 // ── Activation ────────────────────────────────────────────────────────────────
 
-export function activate(context: vscode.ExtensionContext): void {
-    const provider = new RelationshipProvider();
-
+export function activate(ctx: vscode.ExtensionContext): void {
+    const provider = new RelProvider();
     vscode.window.registerTreeDataProvider('capyrelRelationships', provider);
 
-    // Auto-refresh when PHP files change
+    // Refresh sidebar when migrations change
     const watcher = vscode.workspace.createFileSystemWatcher('**/database/migrations/**/*.php');
     watcher.onDidChange(() => provider.refresh());
     watcher.onDidCreate(() => provider.refresh());
+    ctx.subscriptions.push(watcher);
 
-    context.subscriptions.push(
-        watcher,
-        vscode.commands.registerCommand('capyrel.scaffold',      scaffoldDryRun),
-        vscode.commands.registerCommand('capyrel.scaffoldWrite',  scaffoldWrite),
-        vscode.commands.registerCommand('capyrel.map',            showMap),
-        vscode.commands.registerCommand('capyrel.mapMermaid',     exportMermaid),
-        vscode.commands.registerCommand('capyrel.resources',      generateResources),
-        vscode.commands.registerCommand('capyrel.requests',       generateRequests),
-        vscode.commands.registerCommand('capyrel.tests',          generateTests),
-        vscode.commands.registerCommand('capyrel.migrateSafe',    migrateSafe),
-        vscode.commands.registerCommand('capyrel.watch',          startWatch),
-        vscode.commands.registerCommand('capyrel.demo',           runDemo),
-        vscode.commands.registerCommand('capyrel.refresh', () => provider.refresh()),
-    );
+    // Register all commands
+    const cmds: [string, () => any][] = [
+        ['capyrel.scaffold',      scaffoldDryRun],
+        ['capyrel.scaffoldWrite', scaffoldWrite],
+        ['capyrel.fullstack',     fullstack],
+        ['capyrel.map',           showMap],
+        ['capyrel.mapMermaid',    mermaidMap],
+        ['capyrel.resources',     genResources],
+        ['capyrel.requests',      genRequests],
+        ['capyrel.tests',         genTests],
+        ['capyrel.factory',       genFactory],
+        ['capyrel.policy',        genPolicy],
+        ['capyrel.seed',          genSeed],
+        ['capyrel.optimize',      optimizeModels],
+        ['capyrel.livewire',      genLivewire],
+        ['capyrel.enum',          genEnum],
+        ['capyrel.events',        genEvents],
+        ['capyrel.migrateSafe',   migrateSafe],
+        ['capyrel.audit',         runAudit],
+        ['capyrel.clean',         cleanFiles],
+        ['capyrel.watch',         startWatch],
+        ['capyrel.demo',          runDemo],
+        ['capyrel.refresh',       () => provider.refresh()],
+    ];
 
-    // Initial load
+    for (const [cmd, handler] of cmds) {
+        ctx.subscriptions.push(vscode.commands.registerCommand(cmd, handler));
+    }
+
     provider.refresh();
-
-    vscode.window.showInformationMessage('Capyrel is ready. Open Command Palette → type "Capyrel" to get started.');
 }
 
 export function deactivate(): void {}

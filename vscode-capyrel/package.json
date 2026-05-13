@@ -2,7 +2,7 @@
     "name": "capyrel",
     "displayName": "Capyrel — Laravel Scaffolding",
     "description": "Capyrel integration for VS Code: run scaffold commands, get relationship snippets, and view your model map.",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "publisher": "JulioOxalis",
     "repository": {
         "type": "git",
@@ -23,61 +23,113 @@
         "artisan",
         "php"
     ],
-    "activationEvents": [
-        "workspaceContains:artisan",
-        "workspaceContains:composer.json"
-    ],
+    "activationEvents": [],
     "main": "./out/extension.js",
     "contributes": {
         "commands": [
             {
                 "command": "capyrel.scaffold",
-                "title": "Capyrel: Scaffold (dry-run preview)",
+                "title": "Scaffold — dry-run preview",
                 "category": "Capyrel"
             },
             {
                 "command": "capyrel.scaffoldWrite",
-                "title": "Capyrel: Scaffold (write files)",
+                "title": "Scaffold — write files",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.fullstack",
+                "title": "Fullstack — run all 12 steps",
                 "category": "Capyrel"
             },
             {
                 "command": "capyrel.map",
-                "title": "Capyrel: Show Relationship Map",
+                "title": "Map — show relationship tree",
                 "category": "Capyrel"
             },
             {
                 "command": "capyrel.mapMermaid",
-                "title": "Capyrel: Export Mermaid Diagram",
+                "title": "Map — export Mermaid diagram",
                 "category": "Capyrel"
             },
             {
                 "command": "capyrel.resources",
-                "title": "Capyrel: Generate API Resources",
+                "title": "Generate API Resources",
                 "category": "Capyrel"
             },
             {
                 "command": "capyrel.requests",
-                "title": "Capyrel: Generate Form Requests",
+                "title": "Generate Form Requests",
                 "category": "Capyrel"
             },
             {
                 "command": "capyrel.tests",
-                "title": "Capyrel: Generate Relationship Tests",
+                "title": "Generate Relationship Tests",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.factory",
+                "title": "Generate Factories",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.policy",
+                "title": "Generate Policies",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.seed",
+                "title": "Generate Seeders",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.optimize",
+                "title": "Optimize Models",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.livewire",
+                "title": "Generate Livewire Components",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.enum",
+                "title": "Generate PHP 8.1 Enums",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.events",
+                "title": "Generate Events + Observers",
                 "category": "Capyrel"
             },
             {
                 "command": "capyrel.migrateSafe",
-                "title": "Capyrel: Check Migrations (migrate:safe)",
+                "title": "Check Migrations (migrate:safe)",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.audit",
+                "title": "Audit — generate health report",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.clean",
+                "title": "Clean — remove generated files",
                 "category": "Capyrel"
             },
             {
                 "command": "capyrel.watch",
-                "title": "Capyrel: Start Watch Mode",
+                "title": "Watch — auto-update models",
                 "category": "Capyrel"
             },
             {
                 "command": "capyrel.demo",
-                "title": "Capyrel: Run Demo",
+                "title": "Run Demo",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.refresh",
+                "title": "Refresh Relationship Sidebar",
                 "category": "Capyrel"
             }
         ],
@@ -102,6 +154,11 @@
         "menus": {
             "view/title": [
                 {
+                    "command": "capyrel.refresh",
+                    "when": "view == capyrelRelationships",
+                    "group": "navigation"
+                },
+                {
                     "command": "capyrel.map",
                     "when": "view == capyrelRelationships",
                     "group": "navigation"
@@ -112,12 +169,17 @@
     "scripts": {
         "compile": "tsc -p ./",
         "watch": "tsc -watch -p ./",
-        "package": "vsce package"
+        "package": "vsce package --no-dependencies"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",
         "@types/vscode": "^1.85.0",
         "typescript": "^5.3.0",
         "@vscode/vsce": "^2.22.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
     }
 }

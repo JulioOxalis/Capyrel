@@ -218,7 +218,8 @@ class ScaffoldCommand extends Command
 
         if (!$path) {
             if ($this->option('force') || $this->confirm("    Create {$modelName}Controller.php?", true)) {
-                $code = $this->controllerWriter->generate($modelName, $rels);
+                $columns = $this->getColumnsForModel($modelName);
+                $code = $this->controllerWriter->generate($modelName, $rels, $columns);
                 $dest = app_path("Http/Controllers/{$modelName}Controller.php");
                 file_put_contents($dest, $code);
                 $this->line("    <fg=green>✔</> Controller created <fg=gray>({$modelName}Controller.php)</>");
@@ -292,6 +293,16 @@ class ScaffoldCommand extends Command
         }
 
         return $written > 0;
+    }
+
+    private function getColumnsForModel(string $modelName): array
+    {
+        foreach ($this->analyzer->getTables() as $table) {
+            if (\Illuminate\Support\Str::studly(\Illuminate\Support\Str::singular($table)) === $modelName) {
+                return $this->analyzer->getColumns($table);
+            }
+        }
+        return [];
     }
 
     private function runExternalCommand(string $cmd): void

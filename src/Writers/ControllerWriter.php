@@ -7,15 +7,20 @@ use Illuminate\Support\Str;
 class ControllerWriter
 {
     /**
-     * Generate a full resource controller with relationship-aware methods.
+     * Generate a full resource controller with inline validation and relationship awareness.
+     * Uses $request->validate([...]) — works without FormRequest, no validated() crash.
      */
-    public function generate(string $modelName, array $relationships): string
+    public function generate(string $modelName, array $relationships, array $columns = []): string
     {
-        $variable    = Str::camel($modelName);
-        $variables   = Str::camel(Str::plural($modelName));
-        $viewPrefix  = Str::kebab(Str::plural($modelName));
-        $eagerLoad   = $this->eagerLoadString($relationships);
+        $variable     = Str::camel($modelName);
+        $variables    = Str::camel(Str::plural($modelName));
+        $viewPrefix   = Str::kebab(Str::plural($modelName));
+        $eagerLoad    = $this->eagerLoadString($relationships);
+        $storeRules   = $this->inlineRules($columns, $relationships, 'store');
+        $updateRules  = $this->inlineRules($columns, $relationships, 'update');
+        $fillable     = $this->fillableString($columns);
         $extraMethods = $this->extraMethods($modelName, $relationships);
+        $relatedLoads = $this->relatedLoadForCreate($relationships);
 
         return <<<PHP
 <?php
@@ -36,15 +41,20 @@ class {$modelName}Controller extends Controller
     }
 
     public function create()
-    {
-        return view('{$viewPrefix}.create');
+    {{$relatedLoads}
+        return view('{$viewPrefix}.create'{$this->compactRelated($relationships)});
     }
 
     public function store(Request \$request)
     {
-        \${$variable} = {$modelName}::create(\$request->validated());
+        \$validated = \$request->validate([
+{$storeRules}
+        ]);
 
-        return redirect()->route('{$viewPrefix}.show', \${$variable});
+        \${$variable} = {$modelName}::create(\$validated);
+
+        return redirect()->route('{$viewPrefix}.show', \${$variable})
+            ->with('success', '{$modelName} created successfully.');
     }
 
     // capyrel: loads all detected relations for the detail view
@@ -56,22 +66,28 @@ class {$modelName}Controller extends Controller
     }
 
     public function edit({$modelName} \${$variable})
-    {
-        return view('{$viewPrefix}.edit', compact('{$variable}'));
+    {{$relatedLoads}
+        return view('{$viewPrefix}.edit', compact('{$variable}'{$this->compactRelatedRaw($relationships)}));
     }
 
     public function update(Request \$request, {$modelName} \${$variable})
     {
-        \${$variable}->update(\$request->validated());
+        \$validated = \$request->validate([
+{$updateRules}
+        ]);
 
-        return redirect()->route('{$viewPrefix}.show', \${$variable});
+        \${$variable}->update(\$validated);
+
+        return redirect()->route('{$viewPrefix}.show', \${$variable})
+            ->with('success', '{$modelName} updated successfully.');
     }
 
     public function destroy({$modelName} \${$variable})
     {
         \${$variable}->delete();
 
-        return redirect()->route('{$viewPrefix}.index');
+        return redirect()->route('{$viewPrefix}.index')
+            ->with('success', '{$modelName} deleted.');
     }
 {$extraMethods}}
 PHP;
@@ -79,20 +95,18 @@ PHP;
 
     /**
      * Inject eager loading into an existing controller's index/show methods.
-     * Returns true if any change was made.
      */
     public function inject(string $path, string $modelName, array $relationships): bool
     {
         if (!file_exists($path)) return false;
 
-        $content   = file_get_contents($path);
-        $eager     = $this->eagerLoadString($relationships);
+        $content = file_get_contents($path);
+        $eager   = $this->eagerLoadString($relationships);
 
         if (empty($eager) || str_contains($content, 'capyrel:')) {
             return false;
         }
 
-        // Add ->with([...]) to bare Model:: calls in index/show
         $replaced = preg_replace(
             '/(' . preg_quote($modelName, '/') . '::)(paginate|get|all|first)\s*\(/',
             "{$modelName}::with([{$eager}])->$2(",
@@ -103,7 +117,6 @@ PHP;
 
         if ($count === 0 || $replaced === $content) return false;
 
-        // Add marker comment so we don't inject twice
         $replaced = str_replace(
             "class {$modelName}Controller",
             "// capyrel: eager loading injected\nclass {$modelName}Controller",
@@ -120,12 +133,102 @@ PHP;
         return file_exists($path) ? $path : null;
     }
 
+    // ── Private helpers ───────────────────────────────────────────────────────
+
     private function eagerLoadString(array $relationships): string
     {
         return collect($relationships)
             ->filter(fn($r) => in_array($r['type'], ['hasOne', 'hasMany', 'belongsToMany', 'hasManyThrough']))
             ->map(fn($r) => "'{$r['method']}'")
             ->implode(', ');
+    }
+
+    private function inlineRules(array $columns, array $relationships, string $mode): string
+    {
+        $skip       = ['id', '_id', 'created_at', 'updated_at', 'deleted_at', 'remember_token', 'email_verified_at'];
+        $fkMethods  = collect($relationships)->where('type', 'belongsTo')->pluck('foreign_key')->toArray();
+        $lines      = [];
+        $required   = $mode === 'store' ? "'required'" : "'sometimes'";
+
+        foreach ($columns as $col) {
+            $name = $col['name'];
+            if (in_array($name, $skip)) continue;
+
+            $nullable = ($col['nullable'] ?? false);
+            $type     = strtolower($col['type_name'] ?? 'string');
+            $rules    = [];
+
+            $rules[] = $nullable ? "'nullable'" : $required;
+
+            if (str_contains($name, 'email'))                              $rules[] = "'email'";
+            elseif ($name === 'password' || str_ends_with($name, '_password')) { $rules = ["'required'", "'string'", "'min:8'"]; }
+            elseif (str_ends_with($name, '_id')) {
+                $guessedTable = Str::plural(Str::beforeLast($name, '_id'));
+                $rules[]      = "'integer'";
+                $rules[]      = "'exists:{$guessedTable},id'";
+            } elseif (in_array($type, ['int', 'integer', 'bigint', 'smallint', 'tinyint'])) {
+                $rules[] = "'integer'";
+            } elseif (in_array($type, ['decimal', 'float', 'double', 'numeric', 'real'])) {
+                $rules[] = "'numeric'";
+            } elseif (in_array($type, ['boolean', 'bool'])) {
+                $rules[] = "'boolean'";
+            } elseif (in_array($type, ['date', 'datetime', 'timestamp'])) {
+                $rules[] = "'date'";
+            } elseif (in_array($type, ['json', 'jsonb'])) {
+                $rules[] = "'array'";
+            } else {
+                $rules[] = "'string'";
+                if ($type === 'varchar' || $type === 'character varying') $rules[] = "'max:255'";
+            }
+
+            $ruleList = implode(', ', $rules);
+            $lines[]  = "            '{$name}' => [{$ruleList}],";
+        }
+
+        return implode("\n", $lines);
+    }
+
+    private function fillableString(array $columns): string
+    {
+        $skip = ['id', '_id', 'created_at', 'updated_at', 'deleted_at', 'remember_token'];
+        return collect($columns)
+            ->pluck('name')
+            ->filter(fn($n) => !in_array($n, $skip))
+            ->map(fn($n) => "'{$n}'")
+            ->implode(', ');
+    }
+
+    private function relatedLoadForCreate(array $relationships): string
+    {
+        $btm = collect($relationships)->where('type', 'belongsToMany');
+        if ($btm->isEmpty()) return '';
+
+        $lines = ["\n"];
+        foreach ($btm as $rel) {
+            $relatedClass = $rel['related'];
+            $var          = Str::camel(Str::plural($relatedClass));
+            $lines[]      = "        \${$var} = \\App\\Models\\{$relatedClass}::all();";
+        }
+        $lines[] = '';
+
+        return implode("\n", $lines);
+    }
+
+    private function compactRelated(array $relationships): string
+    {
+        $btm = collect($relationships)->where('type', 'belongsToMany');
+        if ($btm->isEmpty()) return '';
+
+        $vars = $btm->map(fn($r) => "'" . Str::camel(Str::plural($r['related'])) . "'")->implode(', ');
+        return ", compact({$vars})";
+    }
+
+    private function compactRelatedRaw(array $relationships): string
+    {
+        $btm = collect($relationships)->where('type', 'belongsToMany');
+        if ($btm->isEmpty()) return '';
+
+        return ', ' . $btm->map(fn($r) => "'" . Str::camel(Str::plural($r['related'])) . "'")->implode(', ');
     }
 
     private function extraMethods(string $modelName, array $relationships): string

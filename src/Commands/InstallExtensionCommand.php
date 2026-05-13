@@ -54,15 +54,22 @@ class InstallExtensionCommand extends Command
 
     private function findVsix(): ?string
     {
-        $candidates = [
-            // Installed via composer
-            base_path('vendor/julio/capyrel/vscode-capyrel/capyrel-1.0.0.vsix'),
-            // Local dev (path repository)
-            __DIR__ . '/../../vscode-capyrel/capyrel-1.0.0.vsix',
+        // Search for any .vsix in the package directory (future-proof for new versions)
+        $searchDirs = [
+            base_path('vendor/julio/capyrel/vscode-capyrel'),
+            realpath(__DIR__ . '/../../vscode-capyrel'),
         ];
 
-        foreach ($candidates as $path) {
-            if (file_exists($path)) return realpath($path);
+        foreach ($searchDirs as $dir) {
+            if (!$dir || !is_dir($dir)) continue;
+
+            // Find any .vsix file (matches capyrel-1.0.0.vsix, capyrel-1.1.0.vsix etc.)
+            $files = glob("{$dir}/capyrel-*.vsix");
+            if (!empty($files)) {
+                // Return the latest version if multiple exist
+                rsort($files);
+                return realpath($files[0]);
+            }
         }
 
         return null;

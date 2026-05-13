@@ -18,6 +18,7 @@ use Julio\Capyrel\Analyzers\OrphanForeignKeyAnalyzer;
 use Julio\Capyrel\Analyzers\SchemaFillableDriftAnalyzer;
 use Julio\Capyrel\Analyzers\SoftDeleteAnalyzer;
 use Julio\Capyrel\Commands\DemoCommand;
+use Julio\Capyrel\Detectors\FrameworkDetector;
 use Julio\Capyrel\Commands\MapCommand;
 use Julio\Capyrel\Commands\RequestsCommand;
 use Julio\Capyrel\Commands\ResourcesCommand;
@@ -27,6 +28,7 @@ use Julio\Capyrel\Commands\TestsCommand;
 use Julio\Capyrel\Commands\WatchCommand;
 use Julio\Capyrel\Generators\ApiResourceGenerator;
 use Julio\Capyrel\Generators\FormRequestGenerator;
+use Julio\Capyrel\Generators\FullBladeGenerator;
 use Julio\Capyrel\Generators\RelationMethodGenerator;
 use Julio\Capyrel\Generators\RelationshipTestGenerator;
 use Julio\Capyrel\Schema\RelationshipDetector;
@@ -34,6 +36,7 @@ use Julio\Capyrel\Schema\SchemaAnalyzer;
 use Julio\Capyrel\Writers\BladeWriter;
 use Julio\Capyrel\Writers\ControllerWriter;
 use Julio\Capyrel\Writers\ModelWriter;
+use Julio\Capyrel\Writers\RouteWriter;
 
 class CapyrelServiceProvider extends ServiceProvider
 {
@@ -43,16 +46,21 @@ class CapyrelServiceProvider extends ServiceProvider
         $this->app->singleton(SchemaAnalyzer::class);
         $this->app->singleton(RelationshipDetector::class);
 
+        // Detectors
+        $this->app->singleton(FrameworkDetector::class);
+
         // Generators
         $this->app->singleton(RelationMethodGenerator::class);
         $this->app->singleton(ApiResourceGenerator::class);
         $this->app->singleton(FormRequestGenerator::class);
+        $this->app->singleton(FullBladeGenerator::class);
         $this->app->singleton(RelationshipTestGenerator::class);
 
         // Writers
         $this->app->singleton(ModelWriter::class);
         $this->app->singleton(ControllerWriter::class);
         $this->app->singleton(BladeWriter::class);
+        $this->app->singleton(RouteWriter::class);
 
         // Health check analyzers
         $this->app->singleton(N1QueryAnalyzer::class);

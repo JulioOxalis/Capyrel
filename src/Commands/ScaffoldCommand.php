@@ -6,11 +6,14 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 use Julio\Capyrel\Analyzers\Diagnostic;
 use Julio\Capyrel\Analyzers\DiagnosticsRunner;
+use Julio\Capyrel\Detectors\FrameworkDetector;
+use Julio\Capyrel\Generators\FullBladeGenerator;
 use Julio\Capyrel\Schema\SchemaAnalyzer;
 use Julio\Capyrel\Schema\RelationshipDetector;
 use Julio\Capyrel\Writers\ModelWriter;
 use Julio\Capyrel\Writers\ControllerWriter;
 use Julio\Capyrel\Writers\BladeWriter;
+use Julio\Capyrel\Writers\RouteWriter;
 
 class ScaffoldCommand extends Command
 {
@@ -19,7 +22,8 @@ class ScaffoldCommand extends Command
                             {--connection=     : Database connection to read from (default: app default)}
                             {--models          : Write to model files only}
                             {--controllers     : Generate/update controllers only}
-                            {--views           : Add blade comments only}
+                            {--views           : Generate full blade pages}
+                            {--routes          : Write resource routes to web.php}
                             {--dry-run         : Preview everything, write nothing}
                             {--force           : Skip all confirmation prompts}';
 
@@ -32,6 +36,9 @@ class ScaffoldCommand extends Command
         private ModelWriter          $modelWriter,
         private ControllerWriter     $controllerWriter,
         private BladeWriter          $bladeWriter,
+        private FullBladeGenerator   $bladeGenerator,
+        private RouteWriter          $routeWriter,
+        private FrameworkDetector    $frameworkDetector,
     ) {
         parent::__construct();
     }
@@ -89,14 +96,19 @@ class ScaffoldCommand extends Command
         }
 
         // ── Confirm what to write ─────────────────────────────────────────────
+        $fw = $this->frameworkDetector->detect();
+        $this->line("  <fg=gray>CSS framework detected: <fg=white>{$fw}</></>");
+
         $onlyModels      = $this->option('models');
         $onlyControllers = $this->option('controllers');
         $onlyViews       = $this->option('views');
-        $specificFlag    = $onlyModels || $onlyControllers || $onlyViews;
+        $onlyRoutes      = $this->option('routes');
+        $specificFlag    = $onlyModels || $onlyControllers || $onlyViews || $onlyRoutes;
 
         $writeModels      = $specificFlag ? $onlyModels      : true;
         $writeControllers = $specificFlag ? $onlyControllers : true;
         $writeViews       = $specificFlag ? $onlyViews       : true;
+        $writeRoutes      = $specificFlag ? $onlyRoutes      : true;
 
         if (!$this->option('force')) {
             $this->line('');
@@ -107,12 +119,15 @@ class ScaffoldCommand extends Command
             if ($writeControllers && !$this->confirm('  Generate / update controller files?', true)) {
                 $writeControllers = false;
             }
-            if ($writeViews && !$this->confirm('  Add blade usage comments to view files?', true)) {
+            if ($writeViews && !$this->confirm('  Generate full blade pages (index, show, create, edit)?', true)) {
                 $writeViews = false;
+            }
+            if ($writeRoutes && !$this->confirm('  Write resource routes to routes/web.php?', true)) {
+                $writeRoutes = false;
             }
         }
 
-        if (!$writeModels && !$writeControllers && !$writeViews) {
+        if (!$writeModels && !$writeControllers && !$writeViews && !$writeRoutes) {
             $this->line("\n  Nothing to write. Exiting.");
             return self::SUCCESS;
         }
@@ -125,6 +140,7 @@ class ScaffoldCommand extends Command
         $totalModels      = 0;
         $totalControllers = 0;
         $totalViews       = 0;
+        $modelNames       = array_keys($all);
 
         foreach ($all as $modelName => $rels) {
             $this->line("  <fg=cyan>■</> <fg=white;options=bold>{$modelName}</>");
@@ -140,18 +156,35 @@ class ScaffoldCommand extends Command
             }
 
             if ($writeViews) {
-                $created = $this->scaffoldView($modelName, $rels);
+                $created = $this->scaffoldFullBlades($modelName, $rels);
                 $totalViews += (int) $created;
             }
 
             $this->line('');
         }
 
+        // ── Routes ────────────────────────────────────────────────────────────
+        if ($writeRoutes) {
+            $this->line('  <fg=white;options=bold>Routes</>');
+            if ($this->option('force')) {
+                $mw = $this->routeWriter->writeSilent($modelNames);
+                $this->line("  <fg=green>✔</> Routes written to web.php <fg=gray>(middleware: {$mw})</>");
+            } else {
+                $mw = $this->routeWriter->write(
+                    $modelNames,
+                    fn($q) => $this->confirm("  {$q}", true),
+                    fn($cmd) => $this->runExternalCommand($cmd)
+                );
+                $this->line("  <fg=green>✔</> Routes written to web.php <fg=gray>(middleware: {$mw})</>");
+            }
+            $this->line('');
+        }
+
         // ── Summary ───────────────────────────────────────────────────────────
         $this->line('  <fg=green;options=bold>✔ Capyrel scaffold complete.</>');
-        $this->line("  <fg=gray>  {$totalModels} model method(s) added · {$totalControllers} controller(s) touched · {$totalViews} view(s) touched</>");
+        $this->line("  <fg=gray>  {$totalModels} model method(s) added · {$totalControllers} controller(s) touched · {$totalViews} view(s) generated</>");
         $this->line('');
-        $this->line('  <fg=gray>Tip: uncomment the blade placeholders and adjust validation rules in controllers.</>');
+        $this->line('  <fg=gray>Tip: adjust validation rules in controllers and customise blade pages as needed.</>');
         $this->line('');
 
         return self::SUCCESS;
@@ -219,6 +252,52 @@ class ScaffoldCommand extends Command
         }
 
         return $written;
+    }
+
+    private function scaffoldFullBlades(string $modelName, array $rels): bool
+    {
+        $folder  = Str::kebab(Str::plural($modelName));
+        $viewDir = resource_path("views/{$folder}");
+
+        if (!is_dir($viewDir)) {
+            mkdir($viewDir, 0755, true);
+        }
+
+        $columns = [];
+        foreach ($this->analyzer->getTables() as $table) {
+            if (Str::studly(Str::singular($table)) === $modelName) {
+                $columns = $this->analyzer->getColumns($table);
+                break;
+            }
+        }
+
+        $fw    = $this->frameworkDetector->detect();
+        $pages = [
+            'index'  => fn() => $this->bladeGenerator->generateIndex($modelName, $columns),
+            'show'   => fn() => $this->bladeGenerator->generateShow($modelName, $columns, $rels),
+            'create' => fn() => $this->bladeGenerator->generateCreate($modelName, $columns, $rels),
+            'edit'   => fn() => $this->bladeGenerator->generateEdit($modelName, $columns, $rels),
+        ];
+
+        $written = 0;
+        foreach ($pages as $page => $generator) {
+            $path = "{$viewDir}/{$page}.blade.php";
+            if (file_exists($path)) {
+                $this->line("    <fg=gray>~ {$folder}/{$page}.blade.php already exists</>");
+                continue;
+            }
+            file_put_contents($path, $generator());
+            $this->line("    <fg=green>✔</> Created <fg=white>{$folder}/{$page}.blade.php</> <fg=gray>({$fw})</>");
+            $written++;
+        }
+
+        return $written > 0;
+    }
+
+    private function runExternalCommand(string $cmd): void
+    {
+        $this->line("  <fg=gray>Running: {$cmd}</>");
+        passthru($cmd);
     }
 
     // ── Health check display ──────────────────────────────────────────────────

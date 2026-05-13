@@ -1,0 +1,100 @@
+{
+    "Capyrel: hasOne": {
+        "prefix": "cap:hasone",
+        "body": [
+            "public function ${1:model}(): \\Illuminate\\Database\\Eloquent\\Relations\\HasOne",
+            "{",
+            "    return \\$this->hasOne(${2:Model}::class);",
+            "}"
+        ],
+        "description": "Capyrel: hasOne relationship"
+    },
+    "Capyrel: hasMany": {
+        "prefix": "cap:hasmany",
+        "body": [
+            "public function ${1:models}(): \\Illuminate\\Database\\Eloquent\\Relations\\HasMany",
+            "{",
+            "    return \\$this->hasMany(${2:Model}::class);",
+            "}"
+        ],
+        "description": "Capyrel: hasMany relationship"
+    },
+    "Capyrel: belongsTo": {
+        "prefix": "cap:belongsto",
+        "body": [
+            "public function ${1:model}(): \\Illuminate\\Database\\Eloquent\\Relations\\BelongsTo",
+            "{",
+            "    return \\$this->belongsTo(${2:Model}::class);",
+            "}"
+        ],
+        "description": "Capyrel: belongsTo relationship"
+    },
+    "Capyrel: belongsToMany": {
+        "prefix": "cap:btm",
+        "body": [
+            "public function ${1:models}(): \\Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany",
+            "{",
+            "    return \\$this->belongsToMany(${2:Model}::class);",
+            "}"
+        ],
+        "description": "Capyrel: belongsToMany relationship"
+    },
+    "Capyrel: hasManyThrough": {
+        "prefix": "cap:hmt",
+        "body": [
+            "public function ${1:models}(): \\Illuminate\\Database\\Eloquent\\Relations\\HasManyThrough",
+            "{",
+            "    return \\$this->hasManyThrough(${2:FinalModel}::class, ${3:ThroughModel}::class);",
+            "}"
+        ],
+        "description": "Capyrel: hasManyThrough relationship"
+    },
+    "Capyrel: morphTo": {
+        "prefix": "cap:morphto",
+        "body": [
+            "public function ${1:parent}(): \\Illuminate\\Database\\Eloquent\\Relations\\MorphTo",
+            "{",
+            "    return \\$this->morphTo();",
+            "}"
+        ],
+        "description": "Capyrel: morphTo polymorphic relationship"
+    },
+    "Capyrel: morphMany": {
+        "prefix": "cap:morphmany",
+        "body": [
+            "public function ${1:items}(): \\Illuminate\\Database\\Eloquent\\Relations\\MorphMany",
+            "{",
+            "    return \\$this->morphMany(${2:Model}::class, '${3:morphName}');",
+            "}"
+        ],
+        "description": "Capyrel: morphMany polymorphic relationship"
+    },
+    "Capyrel: Resource toArray": {
+        "prefix": "cap:resource",
+        "body": [
+            "public function toArray(Request \\$request): array",
+            "{",
+            "    return [",
+            "        'id'         => \\$this->id,",
+            "        '${1:field}' => \\$this->${1:field},",
+            "        // relationships",
+            "        '${2:relation}' => ${3:Model}Resource::collection(\\$this->whenLoaded('${2:relation}')),",
+            "    ];",
+            "}"
+        ],
+        "description": "Capyrel: API Resource toArray with whenLoaded"
+    },
+    "Capyrel: Form Request rules": {
+        "prefix": "cap:rules",
+        "body": [
+            "public function rules(): array",
+            "{",
+            "    return [",
+            "        '${1:field}' => ['required', 'string', 'max:255'],",
+            "        '${2:fk_id}' => ['required', 'integer', 'exists:${3:table},id'],",
+            "    ];",
+            "}"
+        ],
+        "description": "Capyrel: Form Request rules scaffold"
+    }
+}

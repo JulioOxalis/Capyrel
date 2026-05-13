@@ -1,0 +1,124 @@
+{
+    "name": "capyrel",
+    "displayName": "Capyrel — Laravel Scaffolding",
+    "description": "Capyrel integration for VS Code: run scaffold commands, get relationship snippets, and view your model map.",
+    "version": "1.0.0",
+    "publisher": "JulioOxalis",
+    "icon": "icon.png",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/JulioOxalis/Capyrel"
+    },
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Snippets",
+        "Other"
+    ],
+    "keywords": [
+        "laravel",
+        "capyrel",
+        "scaffold",
+        "eloquent",
+        "artisan",
+        "php"
+    ],
+    "activationEvents": [
+        "workspaceContains:artisan",
+        "workspaceContains:composer.json"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "capyrel.scaffold",
+                "title": "Capyrel: Scaffold (dry-run preview)",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.scaffoldWrite",
+                "title": "Capyrel: Scaffold (write files)",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.map",
+                "title": "Capyrel: Show Relationship Map",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.mapMermaid",
+                "title": "Capyrel: Export Mermaid Diagram",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.resources",
+                "title": "Capyrel: Generate API Resources",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.requests",
+                "title": "Capyrel: Generate Form Requests",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.tests",
+                "title": "Capyrel: Generate Relationship Tests",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.migrateSafe",
+                "title": "Capyrel: Check Migrations (migrate:safe)",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.watch",
+                "title": "Capyrel: Start Watch Mode",
+                "category": "Capyrel"
+            },
+            {
+                "command": "capyrel.demo",
+                "title": "Capyrel: Run Demo",
+                "category": "Capyrel"
+            }
+        ],
+        "snippets": [
+            {
+                "language": "php",
+                "path": "./snippets/php.json"
+            },
+            {
+                "language": "blade",
+                "path": "./snippets/blade.json"
+            }
+        ],
+        "views": {
+            "explorer": [
+                {
+                    "id": "capyrelRelationships",
+                    "name": "Capyrel Relationships"
+                }
+            ]
+        },
+        "menus": {
+            "view/title": [
+                {
+                    "command": "capyrel.map",
+                    "when": "view == capyrelRelationships",
+                    "group": "navigation"
+                }
+            ]
+        }
+    },
+    "scripts": {
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "package": "vsce package"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/vscode": "^1.85.0",
+        "typescript": "^5.3.0",
+        "@vscode/vsce": "^2.22.0"
+    }
+}

@@ -175,6 +175,11 @@ PHP;
         $tenantStoreBlock = $tenantCol ? $this->buildTenantScoping($tenantCol, 'store') : '';
         $tenantCheckBlock = $tenantCol ? $this->buildTenantScoping($tenantCol, 'check', $variable) : '';
 
+        // C15 — Auth owner stamping (user_id, owner_id, created_by, etc.)
+        $authOwnerCol        = $tenantCol ? null : $this->detectAuthOwnerColumn($columns);
+        $authOwnerStoreBlock = $authOwnerCol ? $this->buildAuthOwnerBlock($authOwnerCol, 'store') : '';
+        $authOwnerCheckBlock = $authOwnerCol ? $this->buildAuthOwnerBlock($authOwnerCol, 'check', $variable) : '';
+
         // C18 — Trashed param
         $trashedBlock = $hasSoftDelete ? $this->buildTrashedBlock() : '';
 
@@ -235,7 +240,7 @@ class {$modelName}Controller extends Controller
 {$authStore}        \$validated = \$request->validate([
 {$storeRules}
         ]);
-{$storeUpload}{$tenantStoreBlock}
+{$storeUpload}{$tenantStoreBlock}{$authOwnerStoreBlock}
         \${$variable} = {$modelName}::create(\$validated);
 {$pivotSync}{$storeEvent}{$cacheInvalidate}
         if (\$request->wantsJson()) {
@@ -257,7 +262,7 @@ class {$modelName}Controller extends Controller
 
     public function update(Request \$request, {$modelName} \${$variable}): \Illuminate\Http\RedirectResponse|\Illuminate\Http\JsonResponse
     {
-{$authUpdate}{$tenantCheckBlock}        \$validated = \$request->validate([
+{$authUpdate}{$tenantCheckBlock}{$authOwnerCheckBlock}        \$validated = \$request->validate([
 {$updateRules}
         ]);
 {$updateUpload}
@@ -272,7 +277,7 @@ class {$modelName}Controller extends Controller
 
     public function destroy(Request \$request, {$modelName} \${$variable}): \Illuminate\Http\RedirectResponse|\Illuminate\Http\JsonResponse
     {
-{$authDestroy}{$tenantCheckBlock}{$destroyEvent}        \${$variable}->delete();
+{$authDestroy}{$tenantCheckBlock}{$authOwnerCheckBlock}{$destroyEvent}        \${$variable}->delete();
 {$fileCleanupDestroy}{$cacheInvalidate}
         if (\$request->wantsJson()) {
             return response()->json(['message' => '{$modelName} deleted.']);
@@ -483,7 +488,11 @@ PHP;
 
     private function inlineRules(array $columns, array $relationships, string $mode, string $tableName = ''): string
     {
-        $skip     = ['id', '_id', 'created_at', 'updated_at', 'deleted_at', 'remember_token', 'email_verified_at'];
+        $authOwnerCandidates = ['user_id', 'owner_id', 'created_by', 'author_id', 'assigned_to', 'submitted_by'];
+        $skip     = array_merge(
+            ['id', '_id', 'created_at', 'updated_at', 'deleted_at', 'remember_token', 'email_verified_at'],
+            $authOwnerCandidates
+        );
         $lines    = [];
         $presence = $mode === 'store' ? "'required'" : "'sometimes'";
 
@@ -1132,6 +1141,26 @@ PHPBLOCK;
             if (in_array($c, $names)) return $c;
         }
         return null;
+    }
+
+    private function detectAuthOwnerColumn(array $columns): ?string
+    {
+        $candidates = ['user_id', 'owner_id', 'created_by', 'author_id', 'assigned_to', 'submitted_by'];
+        $names      = array_column($columns, 'name');
+        foreach ($candidates as $c) {
+            if (in_array($c, $names)) return $c;
+        }
+        return null;
+    }
+
+    private function buildAuthOwnerBlock(string $col, string $mode, string $variable = ''): string
+    {
+        return match ($mode) {
+            'store'  => "\n        \$validated['{$col}'] = \$request->user()->id;\n",
+            'index'  => "\n        \$query->where('{$col}', \$request->user()->id);\n",
+            'check'  => "\n        abort_if(\${$variable}->{$col} !== \$request->user()->id, 403);\n",
+            default  => '',
+        };
     }
 
     /**

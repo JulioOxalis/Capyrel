@@ -904,7 +904,8 @@ BLADE;
 
     private function buildInputs(array $columns, array $relationships, ?string $singular, string $mode, string $fw): string
     {
-        $skip         = ['id', '_id', 'created_at', 'updated_at', 'deleted_at', 'remember_token', 'email_verified_at'];
+        $skip         = ['id', '_id', 'created_at', 'updated_at', 'deleted_at', 'remember_token', 'email_verified_at',
+                         'user_id', 'owner_id', 'created_by', 'author_id', 'assigned_to', 'submitted_by'];
         $columnNames  = array_column($columns, 'name');
         $slugSource   = ColumnTypeDetector::findSlugSource($columnNames);
         $lines        = [];

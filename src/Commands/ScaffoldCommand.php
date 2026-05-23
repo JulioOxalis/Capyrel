@@ -22,12 +22,12 @@ class ScaffoldCommand extends Command
                             {--connection=     : Database connection to read from (default: app default)}
                             {--models          : Write to model files only}
                             {--controllers     : Generate/update controllers only}
-                            {--views           : Generate full blade pages}
+                            {--views           : Generate modal-first index blade pages}
                             {--routes          : Write resource routes to web.php}
                             {--dry-run         : Preview everything, write nothing}
                             {--force           : Skip all confirmation prompts}';
 
-    protected $description = 'Detect DB relationships and scaffold models, controllers, and blade views';
+    protected $description = 'Detect DB relationships and scaffold models, controllers, and modal-first blade views';
 
     public function __construct(
         private SchemaAnalyzer       $analyzer,
@@ -119,7 +119,7 @@ class ScaffoldCommand extends Command
             if ($writeControllers && !$this->confirm('  Generate / update controller files?', true)) {
                 $writeControllers = false;
             }
-            if ($writeViews && !$this->confirm('  Generate full blade pages (index, show, create, edit)?', true)) {
+            if ($writeViews && !$this->confirm('  Generate modal-first index pages (create, edit, view, delete modals inline)?', true)) {
                 $writeViews = false;
             }
             if ($writeRoutes && !$this->confirm('  Write resource routes to routes/web.php?', true)) {
@@ -182,7 +182,7 @@ class ScaffoldCommand extends Command
 
         // ── Summary ───────────────────────────────────────────────────────────
         $this->line('  <fg=green;options=bold>✔ Capyrel scaffold complete.</>');
-        $this->line("  <fg=gray>  {$totalModels} model method(s) added · {$totalControllers} controller(s) touched · {$totalViews} view(s) generated</>");
+        $this->line("  <fg=gray>  {$totalModels} model method(s) added · {$totalControllers} controller(s) touched · {$totalViews} index page(s) generated</>");
         $this->line('');
         $this->line('  <fg=gray>Tip: adjust validation rules in controllers and customise blade pages as needed.</>');
         $this->line('');
@@ -201,12 +201,14 @@ class ScaffoldCommand extends Command
             return 0;
         }
 
-        $added = $this->modelWriter->write($path, $rels);
+        $columns = $this->getColumnsForModel($modelName);
+        $indexes = $this->getIndexesForModel($modelName);
+        $added   = $this->modelWriter->write($path, $rels, $columns, $indexes);
 
         if ($added > 0) {
-            $this->line("    <fg=green>✔</> Model updated <fg=gray>({$added} method(s) added)</>");
+            $this->line("    <fg=green>✔</> Model enhanced <fg=gray>({$added} feature(s) added: relationships, casts, scopes, accessors)</>");
         } else {
-            $this->line("    <fg=gray>~ Model unchanged (methods already present)</>");
+            $this->line("    <fg=gray>~ Model unchanged (already up to date)</>");
         }
 
         return $added;
@@ -239,22 +241,6 @@ class ScaffoldCommand extends Command
         return $injected;
     }
 
-    private function scaffoldView(string $modelName, array $rels): bool
-    {
-        $viewPath = $this->bladeWriter->resolveViewPath($modelName);
-        $comments = $this->bladeWriter->generateComments($modelName, $rels);
-        $written  = $this->bladeWriter->writeToView($viewPath, $comments);
-        $label    = Str::kebab(Str::plural($modelName)) . '/show.blade.php';
-
-        if ($written) {
-            $this->line("    <fg=green>✔</> Blade updated <fg=gray>({$label})</>");
-        } else {
-            $this->line("    <fg=gray>~ Blade unchanged ({$label})</>");
-        }
-
-        return $written;
-    }
-
     private function scaffoldFullBlades(string $modelName, array $rels): bool
     {
         $folder  = Str::kebab(Str::plural($modelName));
@@ -264,35 +250,18 @@ class ScaffoldCommand extends Command
             mkdir($viewDir, 0755, true);
         }
 
-        $columns = [];
-        foreach ($this->analyzer->getTables() as $table) {
-            if (Str::studly(Str::singular($table)) === $modelName) {
-                $columns = $this->analyzer->getColumns($table);
-                break;
-            }
+        $columns = $this->getColumnsForModel($modelName);
+        $fw      = $this->frameworkDetector->detect();
+        $path    = "{$viewDir}/index.blade.php";
+
+        if (file_exists($path)) {
+            $this->line("    <fg=gray>~ {$folder}/index.blade.php already exists</>");
+            return false;
         }
 
-        $fw    = $this->frameworkDetector->detect();
-        $pages = [
-            'index'  => fn() => $this->bladeGenerator->generateIndex($modelName, $columns),
-            'show'   => fn() => $this->bladeGenerator->generateShow($modelName, $columns, $rels),
-            'create' => fn() => $this->bladeGenerator->generateCreate($modelName, $columns, $rels),
-            'edit'   => fn() => $this->bladeGenerator->generateEdit($modelName, $columns, $rels),
-        ];
-
-        $written = 0;
-        foreach ($pages as $page => $generator) {
-            $path = "{$viewDir}/{$page}.blade.php";
-            if (file_exists($path)) {
-                $this->line("    <fg=gray>~ {$folder}/{$page}.blade.php already exists</>");
-                continue;
-            }
-            file_put_contents($path, $generator());
-            $this->line("    <fg=green>✔</> Created <fg=white>{$folder}/{$page}.blade.php</> <fg=gray>({$fw})</>");
-            $written++;
-        }
-
-        return $written > 0;
+        file_put_contents($path, $this->bladeGenerator->generateIndex($modelName, $columns, $rels));
+        $this->line("    <fg=green>✔</> Created <fg=white>{$folder}/index.blade.php</> <fg=gray>({$fw} · modals inline)</>");
+        return true;
     }
 
     private function getColumnsForModel(string $modelName): array
@@ -300,6 +269,16 @@ class ScaffoldCommand extends Command
         foreach ($this->analyzer->getTables() as $table) {
             if (\Illuminate\Support\Str::studly(\Illuminate\Support\Str::singular($table)) === $modelName) {
                 return $this->analyzer->getColumns($table);
+            }
+        }
+        return [];
+    }
+
+    private function getIndexesForModel(string $modelName): array
+    {
+        foreach ($this->analyzer->getTables() as $table) {
+            if (\Illuminate\Support\Str::studly(\Illuminate\Support\Str::singular($table)) === $modelName) {
+                return $this->analyzer->getIndexes($table);
             }
         }
         return [];

@@ -3,6 +3,7 @@
 namespace Julio\Capyrel\Generators;
 
 use Illuminate\Support\Str;
+use Julio\Capyrel\Detectors\UploadColumnDetector;
 
 class FactoryGenerator
 {
@@ -151,6 +152,17 @@ PHP;
                 return "\\App\\Models\\{$guessedModel}::factory()";
             }
             return "fake()->numberBetween(1, 10)";
+        }
+
+        // Upload / file columns — return storage path string, not a real URL
+        if (UploadColumnDetector::isImageColumn($name)) {
+            return "'images/' . fake()->uuid() . '.jpg'";
+        }
+        if (UploadColumnDetector::isVideoColumn($name)) {
+            return "'videos/' . fake()->uuid() . '.mp4'";
+        }
+        if (UploadColumnDetector::isFileColumn($name)) {
+            return "'files/' . fake()->uuid() . '.pdf'";
         }
 
         // Exact column name match

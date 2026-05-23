@@ -559,3 +559,48 @@ After composer require julio/capyrel:
 php artisan capyrel:install-extension
 
 composer update julio/capyrel
+
+
+
+
+
+
+
+
+
+
+
+u see it makes the selection from wrong tables while it can red the tables why fals to select from exct tables we got attachment and teams tables but fetched from wrong path
+
+SQLSTATE[42S02]: Base table or view not found: 1146 Table 'capy.attachables' doesn't exist (Connection: mysql, Host: 127.0.0.1, Port: 3306, Database: capy, SQL: select count(*) as aggregate from `attachables` where `id` = 1)
+
+
+
+
+
+<!-- update -->
+ApiResourceGenerator: typed field rendering, counts, field visibility, meta block (C1 improved)
+
+FormRequestGenerator: authorize via policy, Rule::unique ignore-self on update, file rules, ENUM in rules (C2 improved)
+
+StateMachineGenerator: transitions map, guards, InvalidTransitionException, controller methods (A1)
+
+Repository + Service + DTO generators with interface, implementation, and commands (A2 A3)
+
+OpenApiGenerator: full YAML spec from schema+validation+routes (A5)
+
+TypeScript + Axios generators: interfaces, payload types, typed service class (A6 A7)
+
+Postman collection generator (A8)
+
+Broadcasting + Webhook + SSE generators with events, channels, jobs (A9 A10)
+
+ArtisanCommandGenerator: per-model CLI (list/create/delete/stats) (A12)
+
+HealthCheckGenerator + NotificationGenerator (A17 A20)
+
+PermissionMatrixGenerator: seeder + policies per model (A24)
+
+GraphQLGenerator: Lighthouse schema types, queries, mutations (A32)
+
+All new Artisan commands + update ServiceProvider + FullstackCommand

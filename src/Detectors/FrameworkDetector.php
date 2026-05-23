@@ -64,6 +64,38 @@ class FrameworkDetector
         return $this->livewireCached = isset($packages['livewire/livewire']);
     }
 
+    public function hasSpatieMedia(): bool
+    {
+        return $this->hasPackage('spatie/laravel-medialibrary')
+            && (bool) config('capyrel.spatie.media_library', true);
+    }
+
+    public function hasSpatiePermissions(): bool
+    {
+        return $this->hasPackage('spatie/laravel-permission')
+            && (bool) config('capyrel.spatie.permissions', true);
+    }
+
+    public function hasLaravelScout(): bool
+    {
+        return $this->hasPackage('laravel/scout')
+            && (bool) config('capyrel.scout.enabled', true);
+    }
+
+    public function hasInterventionImage(): bool
+    {
+        return $this->hasPackage('intervention/image');
+    }
+
+    private function hasPackage(string $package): bool
+    {
+        $composerPath = base_path('composer.json');
+        if (!file_exists($composerPath)) return false;
+        $c = json_decode(file_get_contents($composerPath), true) ?? [];
+        $deps = array_merge($c['require'] ?? [], $c['require-dev'] ?? []);
+        return isset($deps[$package]);
+    }
+
     private function resolve(): string
     {
         // 1. Check package.json dependencies

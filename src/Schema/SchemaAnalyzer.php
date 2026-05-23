@@ -128,6 +128,46 @@ class SchemaAnalyzer
         return true;
     }
 
+    /**
+     * Parse ENUM allowed values from a column's type string.
+     * Laravel's Schema::getColumns() returns type as "enum('a','b','c')" for MySQL ENUMs.
+     */
+    public function getEnumValues(string $table, string $column): array
+    {
+        foreach ($this->getColumns($table) as $col) {
+            if ($col['name'] !== $column) continue;
+            if (strtolower($col['type_name'] ?? '') !== 'enum') return [];
+            preg_match_all("/'([^']+)'/", $col['type'] ?? '', $matches);
+            return $matches[1] ?? [];
+        }
+        return [];
+    }
+
+    /**
+     * Return the MySQL column comment, or empty string if none.
+     * The 'comment' key is included in Laravel 12's Schema::getColumns() output.
+     */
+    public function getColumnComment(string $table, string $column): string
+    {
+        foreach ($this->getColumns($table) as $col) {
+            if ($col['name'] === $column) return trim($col['comment'] ?? '');
+        }
+        return '';
+    }
+
+    /** Columns whose type_name is 'enum', keyed by column name → [values] */
+    public function getEnumColumns(string $table): array
+    {
+        $result = [];
+        foreach ($this->getColumns($table) as $col) {
+            if (strtolower($col['type_name'] ?? '') === 'enum') {
+                preg_match_all("/'([^']+)'/", $col['type'] ?? '', $m);
+                $result[$col['name']] = $m[1] ?? [];
+            }
+        }
+        return $result;
+    }
+
     public function getMorphColumns(string $table): array
     {
         $columns = $this->getColumnNames($table);

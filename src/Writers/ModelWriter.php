@@ -6,13 +6,17 @@ use Julio\Capyrel\Generators\RelationMethodGenerator;
 
 class ModelWriter
 {
-    public function __construct(private RelationMethodGenerator $generator) {}
+    public function __construct(
+        private RelationMethodGenerator $generator,
+        private ModelEnhancer           $enhancer,
+    ) {}
 
     /**
-     * Inject missing relationship methods into a model file.
-     * Returns the number of methods added.
+     * Inject missing relationship methods AND all model enhancements (casts, scopes, etc.)
+     * into an existing model file.
+     * Returns total number of things added/enhanced.
      */
-    public function write(string $path, array $relationships): int
+    public function write(string $path, array $relationships, array $columns = [], array $indexes = []): int
     {
         if (!file_exists($path)) return 0;
 
@@ -21,6 +25,7 @@ class ModelWriter
         $added    = 0;
         $toInject = '';
 
+        // ── Relationship methods ───────────────────────────────────────────
         foreach ($relationships as $rel) {
             if (empty($rel['method'])) continue;
             if (in_array($rel['method'], $existing)) continue;
@@ -29,11 +34,16 @@ class ModelWriter
             $added++;
         }
 
-        if ($added === 0) return 0;
+        if ($toInject) {
+            $content = preg_replace('/\n}\s*$/', "\n{$toInject}\n}", $content);
+            file_put_contents($path, $content);
+        }
 
-        // Inject before the last closing brace of the class
-        $content = preg_replace('/\n}\s*$/', "\n{$toInject}\n}", $content);
-        file_put_contents($path, $content);
+        // ── Model enhancements (casts, hidden, scopes, accessors, etc.) ───
+        if (!empty($columns)) {
+            $enhanced = $this->enhancer->enhance($path, $columns, $relationships, $indexes);
+            $added   += $enhanced;
+        }
 
         return $added;
     }

@@ -3,6 +3,7 @@
 namespace Julio\Capyrel\Commands;
 
 use Illuminate\Console\Command;
+use Julio\Capyrel\Generators\FeatureTestGenerator;
 use Julio\Capyrel\Generators\RelationshipTestGenerator;
 use Julio\Capyrel\Schema\SchemaAnalyzer;
 use Julio\Capyrel\Schema\RelationshipDetector;
@@ -13,7 +14,8 @@ class TestsCommand extends Command
                             {model?         : Generate for a specific model only}
                             {--connection=  : Database connection to use}
                             {--force        : Overwrite existing test files}
-                            {--dry-run      : Preview without writing}';
+                            {--dry-run      : Preview without writing}
+                            {--feature      : Also generate HTTP feature tests (store/update/destroy)}';
 
     protected $description = 'Generate Pest relationship tests for all detected models';
 
@@ -21,6 +23,7 @@ class TestsCommand extends Command
         private SchemaAnalyzer              $analyzer,
         private RelationshipDetector        $detector,
         private RelationshipTestGenerator   $generator,
+        private FeatureTestGenerator        $featureGenerator,
     ) {
         parent::__construct();
     }
@@ -48,46 +51,72 @@ class TestsCommand extends Command
             return self::SUCCESS;
         }
 
-        $testsPath = base_path('tests/Models');
-        if (!is_dir($testsPath) && !$this->option('dry-run')) {
-            mkdir($testsPath, 0755, true);
+        $testsPath    = base_path('tests/Models');
+        $featurePath  = base_path('tests/Feature');
+        if (!$this->option('dry-run')) {
+            if (!is_dir($testsPath)) mkdir($testsPath, 0755, true);
+            if ($this->option('feature') && !is_dir($featurePath)) mkdir($featurePath, 0755, true);
         }
 
         $this->line('');
-        $this->line('  <fg=cyan;options=bold>Generating Relationship Tests...</>');
+        $this->line('  <fg=cyan;options=bold>Generating Tests...</>');
         $this->line('');
 
         $created = 0;
         $skipped = 0;
 
         foreach ($relationships as $modelName => $rels) {
-            $filePath = "{$testsPath}/{$modelName}Test.php";
-            $code     = $this->generator->generate($modelName, $rels);
+            // ── Relationship tests ─────────────────────────────────────────
+            $relFilePath = "{$testsPath}/{$modelName}Test.php";
+            $relCode     = $this->generator->generate($modelName, $rels);
 
             if ($this->option('dry-run')) {
                 $this->line("  <fg=cyan>[dry-run]</> Would create: <fg=white>tests/Models/{$modelName}Test.php</>");
                 $this->previewTests($modelName, $rels);
-                $created++;
-                continue;
-            }
-
-            if (file_exists($filePath) && !$this->option('force')) {
+            } elseif (file_exists($relFilePath) && !$this->option('force')) {
                 $this->line("  <fg=gray>~</> {$modelName}Test.php exists — use --force to overwrite");
                 $skipped++;
-                continue;
+            } else {
+                file_put_contents($relFilePath, $relCode);
+                $this->line("  <fg=green>✔</> Created <fg=white>tests/Models/{$modelName}Test.php</>");
+                $created++;
             }
 
-            file_put_contents($filePath, $code);
-            $this->line("  <fg=green>✔</> Created <fg=white>tests/Models/{$modelName}Test.php</> (" . count($rels) . " tests)");
-            $created++;
+            // ── HTTP Feature tests (opt-in) ────────────────────────────────
+            if ($this->option('feature')) {
+                $columns     = $this->getColumnsForModel($modelName);
+                $featPath    = "{$featurePath}/{$modelName}ControllerTest.php";
+                $featCode    = $this->featureGenerator->generate($modelName, $columns, $rels);
+
+                if ($this->option('dry-run')) {
+                    $this->line("  <fg=cyan>[dry-run]</> Would create: <fg=white>tests/Feature/{$modelName}ControllerTest.php</>");
+                } elseif (file_exists($featPath) && !$this->option('force')) {
+                    $this->line("  <fg=gray>~</> {$modelName}ControllerTest.php exists — skipped");
+                    $skipped++;
+                } else {
+                    file_put_contents($featPath, $featCode);
+                    $this->line("  <fg=green>✔</> Created <fg=white>tests/Feature/{$modelName}ControllerTest.php</>");
+                    $created++;
+                }
+            }
         }
 
         $this->line('');
         $this->line("  <fg=green;options=bold>Done.</> {$created} test file(s) created · {$skipped} skipped");
-        $this->line("  <fg=gray>Run: php artisan test --filter=relationships</>");
+        $this->line("  <fg=gray>Run: php artisan test</>");
         $this->line('');
 
         return self::SUCCESS;
+    }
+
+    private function getColumnsForModel(string $modelName): array
+    {
+        foreach ($this->analyzer->getTables() as $table) {
+            if (\Illuminate\Support\Str::studly(\Illuminate\Support\Str::singular($table)) === $modelName) {
+                return $this->analyzer->getColumns($table);
+            }
+        }
+        return [];
     }
 
     private function previewTests(string $modelName, array $rels): void

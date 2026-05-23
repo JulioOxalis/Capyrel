@@ -7,12 +7,12 @@ use Illuminate\Support\Str;
 use Julio\Capyrel\Analyzers\Diagnostic;
 use Julio\Capyrel\Analyzers\DiagnosticsRunner;
 use Julio\Capyrel\Detectors\FrameworkDetector;
-use Julio\Capyrel\Generators\FullBladeGenerator;
 use Julio\Capyrel\Schema\SchemaAnalyzer;
+use Julio\Capyrel\UI\UiAdapterRegistry;
+use Julio\Capyrel\UI\UiContractBuilder;
 use Julio\Capyrel\Schema\RelationshipDetector;
-use Julio\Capyrel\Writers\ModelWriter;
 use Julio\Capyrel\Writers\ControllerWriter;
-use Julio\Capyrel\Writers\BladeWriter;
+use Julio\Capyrel\Writers\ModelWriter;
 use Julio\Capyrel\Writers\RouteWriter;
 
 class ScaffoldCommand extends Command
@@ -22,8 +22,9 @@ class ScaffoldCommand extends Command
                             {--connection=     : Database connection to read from (default: app default)}
                             {--models          : Write to model files only}
                             {--controllers     : Generate/update controllers only}
-                            {--views           : Generate modal-first index blade pages}
+                            {--views           : Generate blade pages via UI contract pipeline}
                             {--routes          : Write resource routes to web.php}
+                            {--adapter=        : UI adapter to use (blade-basic, blade-social, blade-admin, blade-marketplace)}
                             {--dry-run         : Preview everything, write nothing}
                             {--force           : Skip all confirmation prompts}';
 
@@ -35,10 +36,10 @@ class ScaffoldCommand extends Command
         private DiagnosticsRunner    $diagnostics,
         private ModelWriter          $modelWriter,
         private ControllerWriter     $controllerWriter,
-        private BladeWriter          $bladeWriter,
-        private FullBladeGenerator   $bladeGenerator,
         private RouteWriter          $routeWriter,
         private FrameworkDetector    $frameworkDetector,
+        private UiContractBuilder    $contractBuilder,
+        private UiAdapterRegistry    $registry,
     ) {
         parent::__construct();
     }
@@ -96,8 +97,14 @@ class ScaffoldCommand extends Command
         }
 
         // ── Confirm what to write ─────────────────────────────────────────────
-        $fw = $this->frameworkDetector->detect();
-        $this->line("  <fg=gray>CSS framework detected: <fg=white>{$fw}</></>");
+        $fw          = $this->frameworkDetector->detect();
+        $adapterName = $this->option('adapter') ?: config('capyrel.ui.adapter', 'blade-basic');
+
+        $this->line("  <fg=gray>CSS framework: <fg=white>{$fw}</>  ·  UI adapter: <fg=cyan>{$adapterName}</></>");
+
+        if ($this->option('adapter')) {
+            $this->registry->setDefault($adapterName);
+        }
 
         $onlyModels      = $this->option('models');
         $onlyControllers = $this->option('controllers');
@@ -119,7 +126,7 @@ class ScaffoldCommand extends Command
             if ($writeControllers && !$this->confirm('  Generate / update controller files?', true)) {
                 $writeControllers = false;
             }
-            if ($writeViews && !$this->confirm('  Generate modal-first index pages (create, edit, view, delete modals inline)?', true)) {
+            if ($writeViews && !$this->confirm("  Generate blade views via [{$adapterName}] adapter (list / create / show)?", true)) {
                 $writeViews = false;
             }
             if ($writeRoutes && !$this->confirm('  Write resource routes to routes/web.php?', true)) {
@@ -156,7 +163,7 @@ class ScaffoldCommand extends Command
             }
 
             if ($writeViews) {
-                $created = $this->scaffoldFullBlades($modelName, $rels);
+                $created = $this->scaffoldFullBlades($modelName, $rels, $adapterName);
                 $totalViews += (int) $created;
             }
 
@@ -182,7 +189,7 @@ class ScaffoldCommand extends Command
 
         // ── Summary ───────────────────────────────────────────────────────────
         $this->line('  <fg=green;options=bold>✔ Capyrel scaffold complete.</>');
-        $this->line("  <fg=gray>  {$totalModels} model method(s) added · {$totalControllers} controller(s) touched · {$totalViews} index page(s) generated</>");
+        $this->line("  <fg=gray>  {$totalModels} model method(s) added · {$totalControllers} controller(s) touched · {$totalViews} view(s) generated via [{$adapterName}]</>");
         $this->line('');
         $this->line('  <fg=gray>Tip: adjust validation rules in controllers and customise blade pages as needed.</>');
         $this->line('');
@@ -241,27 +248,38 @@ class ScaffoldCommand extends Command
         return $injected;
     }
 
-    private function scaffoldFullBlades(string $modelName, array $rels): bool
+    private function scaffoldFullBlades(string $modelName, array $rels, string $adapterName): bool
     {
-        $folder  = Str::kebab(Str::plural($modelName));
-        $viewDir = resource_path("views/{$folder}");
+        $folder   = Str::kebab(Str::plural($modelName));
+        $viewDir  = resource_path("views/{$folder}");
+        $columns  = $this->getColumnsForModel($modelName);
+        $contract = $this->contractBuilder->build($modelName, $columns, $rels);
+        $adapter  = $this->registry->resolve($modelName);
+        $force    = $this->option('force');
 
         if (!is_dir($viewDir)) {
             mkdir($viewDir, 0755, true);
         }
 
-        $columns = $this->getColumnsForModel($modelName);
-        $fw      = $this->frameworkDetector->detect();
-        $path    = "{$viewDir}/index.blade.php";
+        $screens = [
+            'index.blade.php'  => fn() => $adapter->renderList($contract),
+            'create.blade.php' => fn() => $adapter->renderCreate($contract),
+            'show.blade.php'   => fn() => $adapter->renderShow($contract),
+        ];
 
-        if (file_exists($path)) {
-            $this->line("    <fg=gray>~ {$folder}/index.blade.php already exists</>");
-            return false;
+        $written = false;
+        foreach ($screens as $filename => $render) {
+            $path = "{$viewDir}/{$filename}";
+            if (file_exists($path) && !$force) {
+                $this->line("    <fg=gray>~ {$folder}/{$filename} exists</>");
+                continue;
+            }
+            file_put_contents($path, $render());
+            $this->line("    <fg=green>✔</> {$folder}/{$filename} <fg=gray>[{$adapterName}]</>");
+            $written = true;
         }
 
-        file_put_contents($path, $this->bladeGenerator->generateIndex($modelName, $columns, $rels));
-        $this->line("    <fg=green>✔</> Created <fg=white>{$folder}/index.blade.php</> <fg=gray>({$fw} · modals inline)</>");
-        return true;
+        return $written;
     }
 
     private function getColumnsForModel(string $modelName): array

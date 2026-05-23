@@ -91,6 +91,11 @@ use Julio\Capyrel\Generators\WebhookGenerator;
 use Julio\Capyrel\Schema\RelationshipDetector;
 use Julio\Capyrel\Schema\SchemaAnalyzer;
 
+// ── UI Contract system ────────────────────────────────────────────────────────
+use Julio\Capyrel\UI\UiContractBuilder;
+use Julio\Capyrel\UI\UiAdapterRegistry;
+use Julio\Capyrel\Commands\UiContractCommand;
+
 // ── Writers ───────────────────────────────────────────────────────────────────
 use Julio\Capyrel\Writers\BladeWriter;
 use Julio\Capyrel\Writers\ControllerWriter;
@@ -105,6 +110,23 @@ class CapyrelServiceProvider extends ServiceProvider
         // ── Schema ────────────────────────────────────────────────────────────
         $this->app->singleton(SchemaAnalyzer::class);
         $this->app->singleton(RelationshipDetector::class);
+
+        // ── UI Contract system ────────────────────────────────────────────────
+        $this->app->singleton(UiContractBuilder::class);
+        $this->app->singleton(UiAdapterRegistry::class, function ($app) {
+            $registry = new UiAdapterRegistry();
+
+            // Apply global default from config
+            $default = config('capyrel.ui.adapter', 'blade-basic');
+            $registry->setDefault($default);
+
+            // Apply per-model bindings from config
+            foreach (config('capyrel.ui.model_adapters', []) as $model => $adapterName) {
+                $registry->use($model, $adapterName);
+            }
+
+            return $registry;
+        });
 
         // ── Detectors ─────────────────────────────────────────────────────────
         $this->app->singleton(FrameworkDetector::class);
@@ -242,6 +264,9 @@ class CapyrelServiceProvider extends ServiceProvider
                 // ── Audit + clean ─────────────────────────────────────────────
                 AuditCommand::class,
                 CleanCommand::class,
+
+                // ── UI Contract pipeline ──────────────────────────────────────
+                UiContractCommand::class,
 
                 // ── Demo + extension ──────────────────────────────────────────
                 DemoCommand::class,

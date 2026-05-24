@@ -198,7 +198,7 @@ php artisan capyrel:postman    # ready-to-import collection
 ```bash
 php artisan capyrel:new              # interactive wizard
 php artisan capyrel:new --force      # skip all confirmations
-php artisan capyrel:new --no-python  # use PHP-only entity parser
+php artisan capyrel:new --skip-python  # use PHP-only entity parser
 ```
 
 The wizard:

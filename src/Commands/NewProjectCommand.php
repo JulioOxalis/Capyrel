@@ -30,8 +30,8 @@ use Julio\Capyrel\Writers\MigrationWriter;
 class NewProjectCommand extends Command
 {
     protected $signature = 'capyrel:new
-                            {--force    : Skip all confirmation prompts, write everything}
-                            {--no-python: Skip Python NLP and use heuristic parsing only}';
+                            {--force       : Skip all confirmation prompts, write everything}
+                            {--skip-python : Skip Python NLP and use PHP heuristic parsing only}';
 
     protected $description = 'Interactive wizard — define models and migrations for your new project';
 
@@ -220,7 +220,7 @@ class NewProjectCommand extends Command
 
     private function parseDescription(string $description): array
     {
-        if (!$this->option('no-python')) {
+        if (!$this->option('skip-python')) {
             $entities = $this->pythonDescribe($description);
 
             if (!empty($entities)) {
@@ -234,7 +234,7 @@ class NewProjectCommand extends Command
 
     private function suggestFields(string $entity): array
     {
-        if (!$this->option('no-python')) {
+        if (!$this->option('skip-python')) {
             $result = $this->runPython('fields', $entity);
 
             if (isset($result['fields']) && is_array($result['fields'])) {

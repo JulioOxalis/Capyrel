@@ -8,9 +8,6 @@ use Julio\Capyrel\Analyzers\Diagnostic;
 use Julio\Capyrel\Analyzers\DiagnosticsRunner;
 use Julio\Capyrel\Detectors\FrameworkDetector;
 use Julio\Capyrel\Schema\SchemaAnalyzer;
-use Julio\Capyrel\UI\UiAdapterRegistry;
-use Julio\Capyrel\UI\UiContractBuilder;
-use Julio\Capyrel\UI\Contracts\HasExtraFiles;
 use Julio\Capyrel\Schema\RelationshipDetector;
 use Julio\Capyrel\Writers\ControllerWriter;
 use Julio\Capyrel\Writers\ModelWriter;
@@ -23,13 +20,11 @@ class ScaffoldCommand extends Command
                             {--connection=     : Database connection to read from (default: app default)}
                             {--models          : Write to model files only}
                             {--controllers     : Generate/update controllers only}
-                            {--views           : Generate blade pages via UI contract pipeline}
                             {--routes          : Write resource routes to web.php}
-                            {--adapter=        : UI adapter to use (blade-basic, blade-social, blade-admin, blade-marketplace)}
                             {--dry-run         : Preview everything, write nothing}
                             {--force           : Skip all confirmation prompts}';
 
-    protected $description = 'Detect DB relationships and scaffold models, controllers, and modal-first blade views';
+    protected $description = 'Detect DB relationships and scaffold models, controllers, and routes';
 
     public function __construct(
         private SchemaAnalyzer       $analyzer,
@@ -39,8 +34,6 @@ class ScaffoldCommand extends Command
         private ControllerWriter     $controllerWriter,
         private RouteWriter          $routeWriter,
         private FrameworkDetector    $frameworkDetector,
-        private UiContractBuilder    $contractBuilder,
-        private UiAdapterRegistry    $registry,
     ) {
         parent::__construct();
     }
@@ -49,7 +42,6 @@ class ScaffoldCommand extends Command
     {
         $this->banner();
 
-        // ── Analyze ──────────────────────────────────────────────────────────
         $this->line('  <fg=gray>Connecting to database and reading schema...</>');
 
         $connection = $this->option('connection') ?? '';
@@ -64,7 +56,6 @@ class ScaffoldCommand extends Command
 
         $all = $this->detector->detect();
 
-        // ── Filter to requested model ─────────────────────────────────────────
         $target = $this->argument('model');
         if ($target) {
             $all = array_filter(
@@ -85,10 +76,8 @@ class ScaffoldCommand extends Command
             return self::SUCCESS;
         }
 
-        // ── Display ───────────────────────────────────────────────────────────
         $this->displayRelationships($all);
 
-        // ── Health check ─────────────────────────────────────────────────────
         $issues = $this->diagnostics->run($all, $this->analyzer);
         $this->displayHealthCheck($issues);
 
@@ -97,25 +86,16 @@ class ScaffoldCommand extends Command
             return self::SUCCESS;
         }
 
-        // ── Confirm what to write ─────────────────────────────────────────────
-        $fw          = $this->frameworkDetector->detect();
-        $adapterName = $this->option('adapter') ?: config('capyrel.ui.adapter', 'blade-basic');
-
-        $this->line("  <fg=gray>CSS framework: <fg=white>{$fw}</>  ·  UI adapter: <fg=cyan>{$adapterName}</></>");
-
-        if ($this->option('adapter')) {
-            $this->registry->setDefault($adapterName);
-        }
+        $fw = $this->frameworkDetector->detect();
+        $this->line("  <fg=gray>CSS framework detected: <fg=white>{$fw}</></>");
 
         $onlyModels      = $this->option('models');
         $onlyControllers = $this->option('controllers');
-        $onlyViews       = $this->option('views');
         $onlyRoutes      = $this->option('routes');
-        $specificFlag    = $onlyModels || $onlyControllers || $onlyViews || $onlyRoutes;
+        $specificFlag    = $onlyModels || $onlyControllers || $onlyRoutes;
 
         $writeModels      = $specificFlag ? $onlyModels      : true;
         $writeControllers = $specificFlag ? $onlyControllers : true;
-        $writeViews       = $specificFlag ? $onlyViews       : true;
         $writeRoutes      = $specificFlag ? $onlyRoutes      : true;
 
         if (!$this->option('force')) {
@@ -127,15 +107,12 @@ class ScaffoldCommand extends Command
             if ($writeControllers && !$this->confirm('  Generate / update controller files?', true)) {
                 $writeControllers = false;
             }
-            if ($writeViews && !$this->confirm("  Generate blade views via [{$adapterName}] adapter (list / create / edit / show)?", true)) {
-                $writeViews = false;
-            }
             if ($writeRoutes && !$this->confirm('  Write resource routes to routes/web.php?', true)) {
                 $writeRoutes = false;
             }
         }
 
-        if (!$writeModels && !$writeControllers && !$writeViews && !$writeRoutes) {
+        if (!$writeModels && !$writeControllers && !$writeRoutes) {
             $this->line("\n  Nothing to write. Exiting.");
             return self::SUCCESS;
         }
@@ -144,10 +121,8 @@ class ScaffoldCommand extends Command
         $this->line('  <fg=gray>Writing files...</>');
         $this->line('');
 
-        // ── Process each model ────────────────────────────────────────────────
         $totalModels      = 0;
         $totalControllers = 0;
-        $totalViews       = 0;
         $modelNames       = array_keys($all);
 
         foreach ($all as $modelName => $rels) {
@@ -163,15 +138,9 @@ class ScaffoldCommand extends Command
                 $totalControllers += (int) $created;
             }
 
-            if ($writeViews) {
-                $created = $this->scaffoldFullBlades($modelName, $rels, $adapterName);
-                $totalViews += (int) $created;
-            }
-
             $this->line('');
         }
 
-        // ── Routes ────────────────────────────────────────────────────────────
         if ($writeRoutes) {
             $this->line('  <fg=white;options=bold>Routes</>');
             if ($this->option('force')) {
@@ -188,11 +157,11 @@ class ScaffoldCommand extends Command
             $this->line('');
         }
 
-        // ── Summary ───────────────────────────────────────────────────────────
         $this->line('  <fg=green;options=bold>✔ Capyrel scaffold complete.</>');
-        $this->line("  <fg=gray>  {$totalModels} model method(s) added · {$totalControllers} controller(s) touched · {$totalViews} view(s) generated via [{$adapterName}]</>");
+        $this->line("  <fg=gray>  {$totalModels} model method(s) added · {$totalControllers} controller(s) touched</>");
         $this->line('');
-        $this->line('  <fg=gray>Tip: adjust validation rules in controllers and customise blade pages as needed.</>');
+        $this->line('  <fg=gray>Tip: customise your controllers, then build your own UI — or run</>');
+        $this->line('  <fg=gray>     <fg=cyan>php artisan capyrel:new</> to generate models + migrations interactively.</> ');
         $this->line('');
 
         return self::SUCCESS;
@@ -249,75 +218,10 @@ class ScaffoldCommand extends Command
         return $injected;
     }
 
-    private function scaffoldFullBlades(string $modelName, array $rels, string $adapterName): bool
-    {
-        $folder   = Str::kebab(Str::plural($modelName));
-        $viewDir  = resource_path("views/{$folder}");
-        $columns  = $this->getColumnsForModel($modelName);
-        $contract = $this->contractBuilder->build($modelName, $columns, $rels);
-        $adapter  = $this->registry->resolve($modelName);
-        $force    = $this->option('force');
-
-        if (!is_dir($viewDir)) {
-            mkdir($viewDir, 0755, true);
-        }
-
-        $screens = [
-            'list'   => ['file' => 'index.blade.php',  'render' => fn() => $adapter->renderList($contract)],
-            'create' => ['file' => 'create.blade.php', 'render' => fn() => $adapter->renderCreate($contract)],
-            'edit'   => ['file' => 'edit.blade.php',   'render' => fn() => $adapter->renderEdit($contract)],
-            'show'   => ['file' => 'show.blade.php',   'render' => fn() => $adapter->renderShow($contract)],
-        ];
-
-        $written = false;
-        foreach ($screens as $screen => $spec) {
-            $path = "{$viewDir}/{$spec['file']}";
-
-            if (file_exists($path) && !$force) {
-                $this->line("    <fg=gray>~ {$folder}/{$spec['file']} exists</>");
-            } else {
-                file_put_contents($path, ($spec['render'])());
-                $this->line("    <fg=green>✔</> {$folder}/{$spec['file']} <fg=gray>[{$adapterName}]</>");
-                $written = true;
-            }
-
-            // Write extra files for HasExtraFiles adapters (e.g. Livewire components)
-            if ($adapter instanceof HasExtraFiles) {
-                foreach ($adapter->extraFiles($screen, $contract) as $extraPath => $extraContent) {
-                    $extraLabel = $this->relativeLabel($extraPath);
-                    $extraDir   = dirname($extraPath);
-
-                    if (!is_dir($extraDir)) {
-                        mkdir($extraDir, 0755, true);
-                    }
-
-                    if (file_exists($extraPath) && !$force) {
-                        $this->line("    <fg=gray>~ {$extraLabel} exists</>");
-                        continue;
-                    }
-
-                    file_put_contents($extraPath, $extraContent);
-                    $this->line("    <fg=green>✔</> {$extraLabel} <fg=gray>[{$adapterName}]</>");
-                    $written = true;
-                }
-            }
-        }
-
-        return $written;
-    }
-
-    private function relativeLabel(string $absolutePath): string
-    {
-        $base = rtrim(base_path(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
-        return str_starts_with($absolutePath, $base)
-            ? substr($absolutePath, strlen($base))
-            : $absolutePath;
-    }
-
     private function getColumnsForModel(string $modelName): array
     {
         foreach ($this->analyzer->getTables() as $table) {
-            if (\Illuminate\Support\Str::studly(\Illuminate\Support\Str::singular($table)) === $modelName) {
+            if (Str::studly(Str::singular($table)) === $modelName) {
                 return $this->analyzer->getColumns($table);
             }
         }
@@ -327,7 +231,7 @@ class ScaffoldCommand extends Command
     private function getIndexesForModel(string $modelName): array
     {
         foreach ($this->analyzer->getTables() as $table) {
-            if (\Illuminate\Support\Str::studly(\Illuminate\Support\Str::singular($table)) === $modelName) {
+            if (Str::studly(Str::singular($table)) === $modelName) {
                 return $this->analyzer->getIndexes($table);
             }
         }
@@ -370,7 +274,7 @@ class ScaffoldCommand extends Command
                 default             => ['ℹ', 'gray'],
             };
 
-            $model  = $issue->model ? "<fg=cyan>[{$issue->model}]</> " : '';
+            $model = $issue->model ? "<fg=cyan>[{$issue->model}]</> " : '';
             $this->line("  <fg={$color}>{$icon}</> {$model}<fg=white>{$issue->message}</>");
             $this->line("    <fg=gray>↳ {$issue->suggestion}</>");
             $this->line('');

@@ -35,6 +35,7 @@ use Julio\Capyrel\Commands\HealthCheckCommand;
 use Julio\Capyrel\Commands\InstallExtensionCommand;
 use Julio\Capyrel\Commands\LivewireCommand;
 use Julio\Capyrel\Commands\MapCommand;
+use Julio\Capyrel\Commands\NewProjectCommand;
 use Julio\Capyrel\Commands\NotificationsCommand;
 use Julio\Capyrel\Commands\OpenApiCommand;
 use Julio\Capyrel\Commands\OptimizeCommand;
@@ -91,16 +92,16 @@ use Julio\Capyrel\Generators\WebhookGenerator;
 use Julio\Capyrel\Schema\RelationshipDetector;
 use Julio\Capyrel\Schema\SchemaAnalyzer;
 
-// ── UI Contract system ────────────────────────────────────────────────────────
-use Julio\Capyrel\UI\UiContractBuilder;
-use Julio\Capyrel\UI\UiAdapterRegistry;
-use Julio\Capyrel\UI\AdapterDiscovery;
-use Julio\Capyrel\Commands\UiContractCommand;
-use Julio\Capyrel\Commands\UiCacheCommand;
+// ── Wizard ────────────────────────────────────────────────────────────────────
+use Julio\Capyrel\Wizard\LaravelAwareness;
+use Julio\Capyrel\Wizard\EntityParser;
+use Julio\Capyrel\Wizard\FieldInferrer;
+use Julio\Capyrel\Wizard\ModelPlanBuilder;
 
 // ── Writers ───────────────────────────────────────────────────────────────────
 use Julio\Capyrel\Writers\BladeWriter;
 use Julio\Capyrel\Writers\ControllerWriter;
+use Julio\Capyrel\Writers\MigrationWriter;
 use Julio\Capyrel\Writers\ModelEnhancer;
 use Julio\Capyrel\Writers\ModelWriter;
 use Julio\Capyrel\Writers\RouteWriter;
@@ -113,23 +114,12 @@ class CapyrelServiceProvider extends ServiceProvider
         $this->app->singleton(SchemaAnalyzer::class);
         $this->app->singleton(RelationshipDetector::class);
 
-        // ── UI Contract system ────────────────────────────────────────────────
-        $this->app->singleton(UiContractBuilder::class);
-        $this->app->singleton(AdapterDiscovery::class);
-        $this->app->singleton(UiAdapterRegistry::class, function ($app) {
-            $registry = new UiAdapterRegistry();
-
-            // Apply global default from config
-            $default = config('capyrel.ui.adapter', 'blade-basic');
-            $registry->setDefault($default);
-
-            // Apply per-model bindings from config
-            foreach (config('capyrel.ui.model_adapters', []) as $model => $adapterName) {
-                $registry->use($model, $adapterName);
-            }
-
-            return $registry;
-        });
+        // ── Wizard ────────────────────────────────────────────────────────────
+        $this->app->singleton(LaravelAwareness::class);
+        $this->app->singleton(EntityParser::class);
+        $this->app->singleton(FieldInferrer::class);
+        $this->app->singleton(ModelPlanBuilder::class);
+        $this->app->singleton(MigrationWriter::class);
 
         // ── Detectors ─────────────────────────────────────────────────────────
         $this->app->singleton(FrameworkDetector::class);
@@ -217,6 +207,9 @@ class CapyrelServiceProvider extends ServiceProvider
             ], 'capyrel-config');
 
             $this->commands([
+                // ── Project wizard ────────────────────────────────────────────
+                NewProjectCommand::class,          // php artisan capyrel:new
+
                 // ── Core scaffolding ──────────────────────────────────────────
                 ScaffoldCommand::class,
 
@@ -234,25 +227,25 @@ class CapyrelServiceProvider extends ServiceProvider
                 LivewireCommand::class,
 
                 // ── Architecture layer ────────────────────────────────────────
-                StateMachineCommand::class,    // php artisan model:state-machine Post
-                ArchitectureCommand::class,    // php artisan model:architecture Post
+                StateMachineCommand::class,
+                ArchitectureCommand::class,
 
                 // ── Real-time / integration ───────────────────────────────────
-                BroadcastingCommand::class,    // php artisan model:broadcast Post
-                WebhookCommand::class,         // php artisan capyrel:webhooks
-                NotificationsCommand::class,   // php artisan model:notifications Post
+                BroadcastingCommand::class,
+                WebhookCommand::class,
+                NotificationsCommand::class,
 
                 // ── Contract generation ───────────────────────────────────────
-                OpenApiCommand::class,         // php artisan capyrel:openapi
-                TypeScriptCommand::class,      // php artisan capyrel:typescript
-                PostmanCommand::class,         // php artisan capyrel:postman
-                GraphQLCommand::class,         // php artisan capyrel:graphql
+                OpenApiCommand::class,
+                TypeScriptCommand::class,
+                PostmanCommand::class,
+                GraphQLCommand::class,
 
                 // ── Security / permissions ────────────────────────────────────
-                PermissionsCommand::class,     // php artisan capyrel:permissions
+                PermissionsCommand::class,
 
                 // ── Ops ───────────────────────────────────────────────────────
-                HealthCheckCommand::class,     // php artisan capyrel:health-controller
+                HealthCheckCommand::class,
 
                 // ── Safety + watch ────────────────────────────────────────────
                 SafeMigrateCommand::class,
@@ -267,10 +260,6 @@ class CapyrelServiceProvider extends ServiceProvider
                 // ── Audit + clean ─────────────────────────────────────────────
                 AuditCommand::class,
                 CleanCommand::class,
-
-                // ── UI Contract pipeline ──────────────────────────────────────
-                UiContractCommand::class,
-                UiCacheCommand::class,          // php artisan capyrel:ui:cache
 
                 // ── Demo + extension ──────────────────────────────────────────
                 DemoCommand::class,

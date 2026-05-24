@@ -93,27 +93,4 @@ return [
         'enabled' => (bool) env('CAPYREL_SCOUT', true),
     ],
 
-    /*
-    |--------------------------------------------------------------------------
-    | UI Adapter System
-    |--------------------------------------------------------------------------
-    | The UI adapter controls how UI Contracts are rendered into Blade views.
-    |
-    | adapter: name of the globally active adapter (blade-basic by default).
-    |          Install third-party adapters via Composer and set the name here.
-    |
-    | model_adapters: per-model overrides — takes precedence over the global
-    |          adapter. Keyed by model name (e.g. 'Post' => 'blade-social').
-    |
-    | Available built-in adapters: blade-basic
-    */
-    'ui' => [
-        'adapter' => env('CAPYREL_UI_ADAPTER', 'blade-basic'),
-
-        'model_adapters' => [
-            // 'Post'    => 'blade-social',
-            // 'Product' => 'blade-marketplace',
-        ],
-    ],
-
 ];

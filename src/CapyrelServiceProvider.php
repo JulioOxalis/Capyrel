@@ -94,7 +94,9 @@ use Julio\Capyrel\Schema\SchemaAnalyzer;
 // ── UI Contract system ────────────────────────────────────────────────────────
 use Julio\Capyrel\UI\UiContractBuilder;
 use Julio\Capyrel\UI\UiAdapterRegistry;
+use Julio\Capyrel\UI\AdapterDiscovery;
 use Julio\Capyrel\Commands\UiContractCommand;
+use Julio\Capyrel\Commands\UiCacheCommand;
 
 // ── Writers ───────────────────────────────────────────────────────────────────
 use Julio\Capyrel\Writers\BladeWriter;
@@ -113,6 +115,7 @@ class CapyrelServiceProvider extends ServiceProvider
 
         // ── UI Contract system ────────────────────────────────────────────────
         $this->app->singleton(UiContractBuilder::class);
+        $this->app->singleton(AdapterDiscovery::class);
         $this->app->singleton(UiAdapterRegistry::class, function ($app) {
             $registry = new UiAdapterRegistry();
 
@@ -267,6 +270,7 @@ class CapyrelServiceProvider extends ServiceProvider
 
                 // ── UI Contract pipeline ──────────────────────────────────────
                 UiContractCommand::class,
+                UiCacheCommand::class,          // php artisan capyrel:ui:cache
 
                 // ── Demo + extension ──────────────────────────────────────────
                 DemoCommand::class,

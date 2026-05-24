@@ -8,6 +8,7 @@ use Julio\Capyrel\Schema\SchemaAnalyzer;
 use Julio\Capyrel\Schema\RelationshipDetector;
 use Julio\Capyrel\UI\UiContractBuilder;
 use Julio\Capyrel\UI\UiAdapterRegistry;
+use Julio\Capyrel\UI\Contracts\HasExtraFiles;
 
 /**
  * php artisan capyrel:ui:scaffold {model?}
@@ -119,37 +120,55 @@ class UiContractCommand extends Command
         $this->line("  <fg=white;options=bold>{$model}</> <fg=gray>[{$adapterName}]</>");
 
         $screens = [
-            'list'   => fn() => $adapter->renderList($contract),
-            'create' => fn() => $adapter->renderCreate($contract),
-            'show'   => fn() => $adapter->renderShow($contract),
+            'list'   => ['render' => fn() => $adapter->renderList($contract),   'file' => 'index.blade.php'],
+            'create' => ['render' => fn() => $adapter->renderCreate($contract),  'file' => 'create.blade.php'],
+            'edit'   => ['render' => fn() => $adapter->renderEdit($contract),    'file' => 'edit.blade.php'],
+            'show'   => ['render' => fn() => $adapter->renderShow($contract),    'file' => 'show.blade.php'],
         ];
 
-        foreach ($screens as $screen => $render) {
+        foreach ($screens as $screen => $spec) {
             if (!empty($screenFilter) && !in_array($screen, $screenFilter, true)) continue;
 
-            $filename = match ($screen) {
-                'list'   => 'index.blade.php',
-                'create' => 'create.blade.php',
-                'show'   => 'show.blade.php',
-            };
-
-            $path  = "{$viewDir}/{$filename}";
-            $label = "resources/views/{$folder}/{$filename}";
+            $path  = "{$viewDir}/{$spec['file']}";
+            $label = "resources/views/{$folder}/{$spec['file']}";
 
             if ($dryRun) {
                 $this->line("    <fg=cyan>[preview]</> {$label}");
                 $written++;
-                continue;
-            }
-
-            if (file_exists($path) && !$force) {
+            } elseif (file_exists($path) && !$force) {
                 $this->line("    <fg=gray>~</> {$label} <fg=gray>(exists — use --force to overwrite)</>");
-                continue;
+            } else {
+                file_put_contents($path, ($spec['render'])());
+                $this->line("    <fg=green>✔</> {$label}");
+                $written++;
             }
 
-            file_put_contents($path, $render());
-            $this->line("    <fg=green>✔</> {$label}");
-            $written++;
+            // Write extra files emitted by HasExtraFiles adapters (e.g. Livewire components)
+            if ($adapter instanceof HasExtraFiles) {
+                foreach ($adapter->extraFiles($screen, $contract) as $extraPath => $extraContent) {
+                    $extraLabel = $this->relativeLabel($extraPath);
+
+                    if ($dryRun) {
+                        $this->line("    <fg=cyan>[preview]</> {$extraLabel}");
+                        $written++;
+                        continue;
+                    }
+
+                    $extraDir = dirname($extraPath);
+                    if (!is_dir($extraDir)) {
+                        mkdir($extraDir, 0755, true);
+                    }
+
+                    if (file_exists($extraPath) && !$force) {
+                        $this->line("    <fg=gray>~</> {$extraLabel} <fg=gray>(exists — use --force to overwrite)</>");
+                        continue;
+                    }
+
+                    file_put_contents($extraPath, $extraContent);
+                    $this->line("    <fg=green>✔</> {$extraLabel}");
+                    $written++;
+                }
+            }
         }
 
         $this->line('');
@@ -168,6 +187,14 @@ class UiContractCommand extends Command
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private function relativeLabel(string $absolutePath): string
+    {
+        $base = rtrim(base_path(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        return str_starts_with($absolutePath, $base)
+            ? substr($absolutePath, strlen($base))
+            : $absolutePath;
+    }
 
     private function parseScreens(?string $screens): array
     {

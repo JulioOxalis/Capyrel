@@ -47,7 +47,7 @@ class BladeSocialAdapter implements UiAdapter
             : '';
 
         $authorChunk = isset($relPrev['user']) || isset($relPrev['author'])
-            ? $this->feedAvatarChunk($singular, array_key_first(array_filter($relPrev, fn($v, $k) => in_array($k, ['user', 'author']), ARRAY_BOTH) ?: ['user' => 'avatar']))
+            ? $this->feedAvatarChunk($singular, array_key_first(array_filter($relPrev, fn($k) => in_array($k, ['user', 'author']), ARRAY_FILTER_USE_KEY) ?: ['user' => 'avatar']))
             : "<span class=\"text-sm font-medium text-gray-800\">{{ \${$singular}->id }}</span>";
 
         $actionBar = $this->feedActionBar($singular, $relPrev, $route);
@@ -150,6 +150,80 @@ BLADE;
                 <button type="submit"
                         class="px-5 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-full hover:bg-indigo-700 transition">
                     Post {$entity}
+                </button>
+            </div>
+        </form>
+    </div>
+</x-app-layout>
+BLADE;
+    }
+
+    // ── Edit — composer (pre-filled) ─────────────────────────────────────────
+
+    public function renderEdit(array $contract): string
+    {
+        $entity    = $contract['entity'];
+        $screen    = $contract['screens']['create'] ?? [];
+        $fields    = $screen['fields'] ?? [];
+        $relations = $screen['relations'] ?? [];
+        $meta      = $contract['meta'] ?? [];
+        $route     = Str::kebab(Str::plural($entity));
+        $singular  = Str::camel($entity);
+        $titleField = $meta['title_field'] ?? 'id';
+        $descField  = $meta['description_field'];
+
+        $inputs = '';
+        foreach ($fields as $field) {
+            $type = $this->inferType($field);
+            if ($field === $descField) {
+                $inputs .= <<<BLADE
+
+            <div>
+                <textarea name="{$field}" rows="5" placeholder="{{ \${$singular}->{$field} }}"
+                          class="w-full border-0 border-b border-gray-200 pb-2 text-gray-700 placeholder-gray-400 focus:ring-0 focus:border-indigo-400 bg-transparent text-sm resize-none">{{ old('{$field}', \${$singular}->{$field}) }}</textarea>
+                @error('{$field}') <p class="mt-1 text-xs text-red-500">{{ \$message }}</p> @enderror
+            </div>
+BLADE;
+            } else {
+                $inputs .= <<<BLADE
+
+            <div>
+                <input type="{$type}" name="{$field}" value="{{ old('{$field}', \${$singular}->{$field}) }}"
+                       placeholder="{{ ucfirst(str_replace('_', ' ', '{$field}')) }}"
+                       class="w-full border-0 border-b border-gray-200 pb-2 text-gray-900 placeholder-gray-400 focus:ring-0 focus:border-indigo-400 bg-transparent text-sm">
+                @error('{$field}') <p class="mt-1 text-xs text-red-500">{{ \$message }}</p> @enderror
+            </div>
+BLADE;
+            }
+        }
+
+        $relInputs = $this->composerRelations($relations);
+
+        return $this->stamp . <<<BLADE
+<x-app-layout>
+    <x-slot name="header">
+        <div class="flex items-center gap-3">
+            <a href="{{ route('{$route}.show', \${$singular}) }}" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </a>
+            <h2 class="text-xl font-semibold text-gray-900">Edit {$entity}</h2>
+        </div>
+    </x-slot>
+
+    <div class="py-8 max-w-2xl mx-auto px-4 sm:px-6">
+        <form method="POST" action="{{ route('{$route}.update', \${$singular}) }}" enctype="multipart/form-data"
+              class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
+            @csrf
+            @method('PATCH')
+
+            {$inputs}
+            {$relInputs}
+
+            <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+                <a href="{{ route('{$route}.show', \${$singular}) }}" class="text-sm text-gray-500 hover:underline">Cancel</a>
+                <button type="submit"
+                        class="px-5 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-full hover:bg-indigo-700 transition">
+                    Save Changes
                 </button>
             </div>
         </form>
@@ -348,7 +422,7 @@ BLADE;
         }
         if (in_array('delete', $actions)) {
             $html .= <<<BLADE
-                    <form method="POST" action="{{ route('{$route}.destroy', \${$singular}) }}" onsubmit="return confirm('Delete?')">
+                    <form method="POST" action="{{ route('{$route}.destroy', \${$singular}) }}" onsubmit="return confirm('Delete this {$entity}?')">
                         @csrf @method('DELETE')
                         <button type="submit" class="text-xs text-red-400 hover:text-red-600">Delete</button>
                     </form>

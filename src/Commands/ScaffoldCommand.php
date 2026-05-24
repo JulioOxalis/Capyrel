@@ -10,6 +10,7 @@ use Julio\Capyrel\Detectors\FrameworkDetector;
 use Julio\Capyrel\Schema\SchemaAnalyzer;
 use Julio\Capyrel\UI\UiAdapterRegistry;
 use Julio\Capyrel\UI\UiContractBuilder;
+use Julio\Capyrel\UI\Contracts\HasExtraFiles;
 use Julio\Capyrel\Schema\RelationshipDetector;
 use Julio\Capyrel\Writers\ControllerWriter;
 use Julio\Capyrel\Writers\ModelWriter;
@@ -126,7 +127,7 @@ class ScaffoldCommand extends Command
             if ($writeControllers && !$this->confirm('  Generate / update controller files?', true)) {
                 $writeControllers = false;
             }
-            if ($writeViews && !$this->confirm("  Generate blade views via [{$adapterName}] adapter (list / create / show)?", true)) {
+            if ($writeViews && !$this->confirm("  Generate blade views via [{$adapterName}] adapter (list / create / edit / show)?", true)) {
                 $writeViews = false;
             }
             if ($writeRoutes && !$this->confirm('  Write resource routes to routes/web.php?', true)) {
@@ -262,24 +263,55 @@ class ScaffoldCommand extends Command
         }
 
         $screens = [
-            'index.blade.php'  => fn() => $adapter->renderList($contract),
-            'create.blade.php' => fn() => $adapter->renderCreate($contract),
-            'show.blade.php'   => fn() => $adapter->renderShow($contract),
+            'list'   => ['file' => 'index.blade.php',  'render' => fn() => $adapter->renderList($contract)],
+            'create' => ['file' => 'create.blade.php', 'render' => fn() => $adapter->renderCreate($contract)],
+            'edit'   => ['file' => 'edit.blade.php',   'render' => fn() => $adapter->renderEdit($contract)],
+            'show'   => ['file' => 'show.blade.php',   'render' => fn() => $adapter->renderShow($contract)],
         ];
 
         $written = false;
-        foreach ($screens as $filename => $render) {
-            $path = "{$viewDir}/{$filename}";
+        foreach ($screens as $screen => $spec) {
+            $path = "{$viewDir}/{$spec['file']}";
+
             if (file_exists($path) && !$force) {
-                $this->line("    <fg=gray>~ {$folder}/{$filename} exists</>");
-                continue;
+                $this->line("    <fg=gray>~ {$folder}/{$spec['file']} exists</>");
+            } else {
+                file_put_contents($path, ($spec['render'])());
+                $this->line("    <fg=green>✔</> {$folder}/{$spec['file']} <fg=gray>[{$adapterName}]</>");
+                $written = true;
             }
-            file_put_contents($path, $render());
-            $this->line("    <fg=green>✔</> {$folder}/{$filename} <fg=gray>[{$adapterName}]</>");
-            $written = true;
+
+            // Write extra files for HasExtraFiles adapters (e.g. Livewire components)
+            if ($adapter instanceof HasExtraFiles) {
+                foreach ($adapter->extraFiles($screen, $contract) as $extraPath => $extraContent) {
+                    $extraLabel = $this->relativeLabel($extraPath);
+                    $extraDir   = dirname($extraPath);
+
+                    if (!is_dir($extraDir)) {
+                        mkdir($extraDir, 0755, true);
+                    }
+
+                    if (file_exists($extraPath) && !$force) {
+                        $this->line("    <fg=gray>~ {$extraLabel} exists</>");
+                        continue;
+                    }
+
+                    file_put_contents($extraPath, $extraContent);
+                    $this->line("    <fg=green>✔</> {$extraLabel} <fg=gray>[{$adapterName}]</>");
+                    $written = true;
+                }
+            }
         }
 
         return $written;
+    }
+
+    private function relativeLabel(string $absolutePath): string
+    {
+        $base = rtrim(base_path(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        return str_starts_with($absolutePath, $base)
+            ? substr($absolutePath, strlen($base))
+            : $absolutePath;
     }
 
     private function getColumnsForModel(string $modelName): array

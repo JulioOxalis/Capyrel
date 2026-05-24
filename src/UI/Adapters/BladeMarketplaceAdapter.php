@@ -259,6 +259,108 @@ BLADE : '';
 BLADE;
     }
 
+    // ── Edit — product form (pre-filled) ─────────────────────────────────────
+
+    public function renderEdit(array $contract): string
+    {
+        $entity    = $contract['entity'];
+        $screen    = $contract['screens']['create'] ?? [];
+        $fields    = $screen['fields'] ?? [];
+        $relations = $screen['relations'] ?? [];
+        $meta      = $contract['meta'] ?? [];
+        $route     = Str::kebab(Str::plural($entity));
+        $singular  = Str::camel($entity);
+        $titleField = $meta['title_field'] ?? 'name';
+        $descField  = $meta['description_field'];
+
+        $pricing   = array_values(array_filter($fields, fn($f) => $this->isPricingField($f)));
+        $inventory = array_values(array_filter($fields, fn($f) => $this->isInventoryField($f)));
+        $media     = array_values(array_filter($fields, fn($f) => $this->isMediaField($f)));
+        $other     = array_values(array_filter($fields, fn($f) =>
+            !$this->isPricingField($f) && !$this->isInventoryField($f) && !$this->isMediaField($f) && $f !== $descField
+        ));
+
+        $mainInputs    = $this->productInputsEdit($other, $singular, $titleField, $descField);
+        $pricingInputs = $this->productInputsEdit($pricing, $singular);
+        $stockInputs   = $this->productInputsEdit($inventory, $singular);
+        $relInputs     = $this->productRelationInputsEdit($relations, $singular);
+
+        $pricingSection = $pricing ? <<<BLADE
+
+            <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Pricing</h3>
+                <div class="grid grid-cols-2 gap-4">
+{$pricingInputs}
+                </div>
+            </div>
+BLADE : '';
+
+        $stockSection = $inventory ? <<<BLADE
+
+            <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Inventory</h3>
+                <div class="grid grid-cols-2 gap-4">
+{$stockInputs}
+                </div>
+            </div>
+BLADE : '';
+
+        return $this->stamp . <<<BLADE
+<x-app-layout>
+    <x-slot name="header">
+        <div class="flex items-center gap-3">
+            <a href="{{ route('{$route}.show', \${$singular}) }}" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </a>
+            <h2 class="text-lg font-semibold text-gray-900">Edit {$entity}: {{ \${$singular}->{$titleField} }}</h2>
+        </div>
+    </x-slot>
+
+    <div class="py-6 px-4 sm:px-6 lg:px-8">
+        <form method="POST" action="{{ route('{$route}.update', \${$singular}) }}" enctype="multipart/form-data">
+            @csrf
+            @method('PATCH')
+            <div class="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+                <div class="lg:col-span-2 space-y-5">
+                    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                        <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Product Info</h3>
+                        <div class="space-y-4">
+{$mainInputs}
+                        </div>
+                    </div>
+{$pricingSection}
+{$stockSection}
+                </div>
+
+                <div class="space-y-5">
+                    @if(!empty(\$relations))
+                    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                        <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Categorise</h3>
+                        <div class="space-y-4">
+{$relInputs}
+                        </div>
+                    </div>
+                    @endif
+
+                    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6 space-y-2">
+                        <button type="submit"
+                                class="w-full px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition">
+                            Update {$entity}
+                        </button>
+                        <a href="{{ route('{$route}.show', \${$singular}) }}"
+                           class="block w-full text-center px-4 py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition">
+                            Cancel
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+</x-app-layout>
+BLADE;
+    }
+
     // ── Show — product detail ─────────────────────────────────────────────────
 
     public function renderShow(array $contract): string
@@ -537,6 +639,87 @@ BLADE;
     private function isMediaField(string $field): bool
     {
         return (bool) preg_match('/image|photo|avatar|thumbnail|cover|banner|picture/i', $field);
+    }
+
+    private function productInputsEdit(array $fields, string $modelVar, ?string $titleField = null, ?string $descField = null): string
+    {
+        $html = '';
+        foreach ($fields as $field) {
+            $label = Str::headline($field);
+            $type  = $this->inferType($field);
+
+            if ($field === $descField) {
+                $html .= <<<BLADE
+                        <div>
+                            <label for="{$field}" class="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{$label}</label>
+                            <textarea name="{$field}" id="{$field}" rows="4" class="block w-full border-gray-300 rounded-lg shadow-sm text-sm focus:ring-indigo-500 focus:border-indigo-500">{{ old('{$field}', \${$modelVar}->{$field}) }}</textarea>
+                            @error('{$field}') <p class="mt-1 text-xs text-red-500">{{ \$message }}</p> @enderror
+                        </div>
+
+BLADE;
+                continue;
+            }
+
+            $prefix = $this->isPricingField($field)
+                ? '<span class="inline-flex items-center px-3 border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm rounded-l-lg">$</span>'
+                : '';
+            $inputClass = $prefix
+                ? 'flex-1 block min-w-0 border-gray-300 rounded-r-lg shadow-sm text-sm focus:ring-indigo-500 focus:border-indigo-500'
+                : 'block w-full border-gray-300 rounded-lg shadow-sm text-sm focus:ring-indigo-500 focus:border-indigo-500';
+            $wrapper      = $prefix ? '<div class="flex">' . $prefix : '';
+            $wrapperClose = $prefix ? '</div>' : '';
+
+            $html .= <<<BLADE
+                        <div>
+                            <label for="{$field}" class="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{$label}</label>
+                            {$wrapper}<input type="{$type}" name="{$field}" id="{$field}" value="{{ old('{$field}', \${$modelVar}->{$field}) }}" class="{$inputClass}">{$wrapperClose}
+                            @error('{$field}') <p class="mt-1 text-xs text-red-500">{{ \$message }}</p> @enderror
+                        </div>
+
+BLADE;
+        }
+        return $html;
+    }
+
+    private function productRelationInputsEdit(array $relations, string $modelVar): string
+    {
+        $html = '';
+        foreach ($relations as $rel => $uiType) {
+            $label = Str::headline($rel);
+            $input = match ($uiType) {
+                'select' => <<<BLADE
+                            <select name="{$rel}_id" class="block w-full border-gray-300 rounded-lg text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                                <option value="">— {$label} —</option>
+                                @foreach (\${$rel}Options as \$option)
+                                <option value="{{ \$option->id }}" {{ old('{$rel}_id', \${$modelVar}->{$rel}_id) == \$option->id ? 'selected' : '' }}>{{ \$option->name ?? \$option->id }}</option>
+                                @endforeach
+                            </select>
+BLADE,
+                'multi_select' => <<<BLADE
+                            <div class="space-y-1 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2">
+                                @foreach (\${$rel}Options as \$option)
+                                <label class="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                                    <input type="checkbox" name="{$rel}[]" value="{{ \$option->id }}"
+                                           {{ in_array(\$option->id, old('{$rel}', \${$modelVar}->{$rel}->pluck('id')->toArray())) ? 'checked' : '' }}
+                                           class="rounded border-gray-300 text-indigo-600">
+                                    <span class="text-sm text-gray-700">{{ \$option->name ?? \$option->id }}</span>
+                                </label>
+                                @endforeach
+                            </div>
+BLADE,
+                default => '',
+            };
+            if (!$input) continue;
+            $html .= <<<BLADE
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{$label}</label>
+                            {$input}
+                            @error('{$rel}') <p class="mt-1 text-xs text-red-500">{{ \$message }}</p> @enderror
+                        </div>
+
+BLADE;
+        }
+        return $html;
     }
 
     private function inferType(string $field): string

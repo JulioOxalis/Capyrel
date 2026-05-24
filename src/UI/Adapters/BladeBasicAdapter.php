@@ -133,6 +133,46 @@ BLADE;
 BLADE;
     }
 
+    // ── Edit ──────────────────────────────────────────────────────────────────
+
+    public function renderEdit(array $contract): string
+    {
+        $entity     = $contract['entity'];
+        $screen     = $contract['screens']['create'] ?? [];
+        $fields     = $screen['fields'] ?? [];
+        $relations  = $screen['relations'] ?? [];
+        $meta       = $contract['meta'] ?? [];
+        $route      = Str::kebab(Str::plural($entity));
+        $singular   = Str::camel($entity);
+        $titleField = $meta['title_field'] ?? 'id';
+
+        $inputs    = $this->formInputsEdit($fields, $singular);
+        $relInputs = $this->formRelationInputsEdit($relations, $singular);
+
+        return $this->stamp . <<<BLADE
+<x-app-layout>
+    <x-slot name="header">
+        <h2 class="text-xl font-semibold text-gray-800">Edit {$entity}: {{ \${$singular}->{$titleField} }}</h2>
+    </x-slot>
+
+    <div class="py-8 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+        <form method="POST" action="{{ route('{$route}.update', \${$singular}) }}" class="bg-white shadow rounded-lg p-6 space-y-5">
+            @csrf
+            @method('PATCH')
+{$inputs}
+{$relInputs}
+            <div class="flex items-center justify-end gap-3 pt-2">
+                <a href="{{ route('{$route}.show', \${$singular}) }}" class="text-sm text-gray-600 hover:underline">Cancel</a>
+                <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700">
+                    Update {$entity}
+                </button>
+            </div>
+        </form>
+    </div>
+</x-app-layout>
+BLADE;
+    }
+
     // ── Show ──────────────────────────────────────────────────────────────────
 
     public function renderShow(array $contract): string
@@ -261,6 +301,70 @@ BLADE,
                     @endforeach
                 </select>
                 <p class="mt-1 text-xs text-gray-400">Hold Ctrl / Cmd to select multiple.</p>
+BLADE,
+                default => '',
+            };
+
+            if ($input === '') continue;
+
+            $html .= <<<BLADE
+
+            <div>
+                <label for="{$rel}" class="block text-sm font-medium text-gray-700">{$label}</label>
+                {$input}
+                @error('{$rel}') <p class="mt-1 text-xs text-red-600">{{ \$message }}</p> @enderror
+            </div>
+BLADE;
+        }
+        return $html;
+    }
+
+    private function formInputsEdit(array $fields, string $modelVar): string
+    {
+        $html = '';
+        foreach ($fields as $field) {
+            $label = Str::headline($field);
+            $type  = $this->inferInputType($field);
+
+            $input = match ($type) {
+                'textarea' => "<textarea name=\"{$field}\" id=\"{$field}\" rows=\"4\" class=\"mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm\">{{ old('{$field}', \${$modelVar}->{$field}) }}</textarea>",
+                'checkbox' => "<input type=\"checkbox\" name=\"{$field}\" id=\"{$field}\" value=\"1\" {{ old('{$field}', \${$modelVar}->{$field}) ? 'checked' : '' }} class=\"rounded border-gray-300 text-indigo-600 shadow-sm\">",
+                default    => "<input type=\"{$type}\" name=\"{$field}\" id=\"{$field}\" value=\"{{ old('{$field}', \${$modelVar}->{$field}) }}\" class=\"mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm\">",
+            };
+
+            $html .= <<<BLADE
+
+            <div>
+                <label for="{$field}" class="block text-sm font-medium text-gray-700">{$label}</label>
+                {$input}
+                @error('{$field}') <p class="mt-1 text-xs text-red-600">{{ \$message }}</p> @enderror
+            </div>
+BLADE;
+        }
+        return $html;
+    }
+
+    private function formRelationInputsEdit(array $relations, string $modelVar): string
+    {
+        $html = '';
+        foreach ($relations as $rel => $uiType) {
+            $label = Str::headline($rel);
+
+            $input = match ($uiType) {
+                'select' => <<<BLADE
+                <select name="{$rel}_id" id="{$rel}_id" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    <option value="">— Select {$label} —</option>
+                    @foreach (\${$rel}Options as \$option)
+                        <option value="{{ \$option->id }}" {{ old('{$rel}_id', \${$modelVar}->{$rel}_id) == \$option->id ? 'selected' : '' }}>{{ \$option->name ?? \$option->id }}</option>
+                    @endforeach
+                </select>
+BLADE,
+                'multi_select' => <<<BLADE
+                <select name="{$rel}[]" id="{$rel}" multiple class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm h-32">
+                    @foreach (\${$rel}Options as \$option)
+                        <option value="{{ \$option->id }}" {{ in_array(\$option->id, old('{$rel}', \${$modelVar}->{$rel}->pluck('id')->toArray())) ? 'selected' : '' }}>{{ \$option->name ?? \$option->id }}</option>
+                    @endforeach
+                </select>
 BLADE,
                 default => '',
             };

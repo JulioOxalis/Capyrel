@@ -26,6 +26,13 @@ interface UiAdapter
     public function renderCreate(array $contract): string;
 
     /**
+     * Render the edit / update form screen from a UI Contract.
+     * Like create but pre-populated with the model's current values.
+     * The variable name for the model instance is Str::camel($contract['entity']).
+     */
+    public function renderEdit(array $contract): string;
+
+    /**
      * Render the show / detail screen from a UI Contract.
      */
     public function renderShow(array $contract): string;

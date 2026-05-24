@@ -3,6 +3,11 @@
 composer.lock
 .phpunit.result.cache
 
+# Python bytecode
+python/**/__pycache__/
+python/**/*.pyc
+python/**/*.pyo
+
 # VS Code extension build artifacts — keep node_modules out, keep .vsix in
 vscode-capyrel/node_modules/
 vscode-capyrel/out/

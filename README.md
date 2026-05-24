@@ -1,109 +1,264 @@
 # Capyrel
 
-**Intelligent Laravel scaffolding.** Reads your database schema and writes model relationships, controllers, API resources, form requests, and tests — automatically.
+**Schema intelligence for Laravel.** Describe your project in plain English, or point Capyrel at an existing database — it handles models, migrations, controllers, routes, API specs, tests, and more.
 
 ```bash
 composer require julio/capyrel
 ```
 
-> Supports Laravel 11 & 12 · PHP 8.2+ · MySQL · PostgreSQL · SQLite · MongoDB
+> Laravel 11 & 12 · PHP 8.2+ · MySQL · PostgreSQL · SQLite · MongoDB
 
 ---
 
-## What it does
+## Two modes
 
-Capyrel reads your database (tables, columns, foreign keys, indexes) and reverse-engineers every Eloquent relationship. It then writes the code for you across your entire stack.
+| Mode | When to use | Entry point |
+|---|---|---|
+| **New project** | Starting fresh, no database yet | `php artisan capyrel:new` |
+| **Existing database** | DB already exists, need the boilerplate | `php artisan model:scaffold` |
+
+---
+
+## Quick start — new project
 
 ```bash
-php artisan model:scaffold     # writes models, controllers, blade
-php artisan model:map          # visual relationship diagram
-php artisan model:resources    # generates API Resource classes
-php artisan model:requests     # generates Form Request classes
-php artisan model:tests        # generates Pest relationship tests
-php artisan migrate:safe       # scans migrations for dangerous patterns
-php artisan model:watch        # live-updates models when migrations change
+php artisan capyrel:new
+```
+
+```
+  ██████╗ █████╗ ██████╗ ██╗   ██╗██████╗ ███████╗██╗
+ ██╔════╝██╔══██╗██╔══██╗╚██╗ ██╔╝██╔══██╗██╔════╝██║
+ ██║     ███████║██████╔╝ ╚████╔╝ ██████╔╝█████╗  ██║
+ ...
+  New Project Wizard — models + migrations, zero friction
+
+  Laravel 12.x · PHP 8.3 · Scout
+
+  Describe your project (or list your models):
+  > a blog platform with posts, tags, authors, and comments
+
+  Detected entities: Post, Tag, Author, Comment
+
+  ── Post ────────────────────────────────────
+  Archetype matched: post
+  ┌─────────────┬──────────────────┬──────────────┐
+  │ Field       │ Type             │ Flags        │
+  ├─────────────┼──────────────────┼──────────────┤
+  │ title       │ string           │ —            │
+  │ slug        │ string           │ unique       │
+  │ body        │ text             │ nullable     │
+  │ published_at│ timestamp        │ nullable     │
+  │ is_published│ boolean          │ default=false│
+  │ user_id     │ foreignId → users│ —            │
+  └─────────────┴──────────────────┴──────────────┘
+
+  What would you like to do with Post?
+  > Confirm — looks good
+```
+
+Capyrel writes:
+- `app/Models/Post.php` — fillable, casts, relationships, traits
+- `database/migrations/2026_05_24_000000_create_posts_table.php`
+
+Then run:
+
+```bash
+php artisan migrate
+php artisan model:scaffold   # controllers + routes
 ```
 
 ---
 
-## Installation
+## Quick start — existing database
 
 ```bash
-composer require julio/capyrel
+php artisan model:scaffold
 ```
 
-Laravel's auto-discovery registers the service provider. No config publish required.
+```
+  Detected relationships:
+
+  User
+  ├── hasMany          ──▶ Post          [posts.user_id]
+  ├── hasOne           ──▶ Profile       [profiles.user_id]
+  └── belongsToMany    ──▶ Role          [pivot: role_user]
+
+  Post
+  ├── belongsTo        ──▶ User          [posts.user_id]
+  └── hasMany          ──▶ Comment       [comments.post_id]
+
+  ⚕ Health check — 1 warning
+  ⚠ [Post] Missing index on posts.user_id — full table scan risk
+    ↳ Add: $table->index('user_id') in the migration
+
+  Write relationship methods into model files? [yes]
+  Generate / update controller files? [yes]
+  Write resource routes to routes/web.php? [yes]
+
+  ✔ Capyrel scaffold complete.
+    4 model method(s) added · 2 controller(s) touched
+```
 
 ---
 
-## Commands
+## Project examples
 
-### `model:scaffold`
-
-Detects all relationships and scaffolds models, controllers, and blade views.
+### Blog platform
 
 ```bash
-php artisan model:scaffold              # interactive wizard
-php artisan model:scaffold User         # one model only
-php artisan model:scaffold --dry-run    # preview without writing
-php artisan model:scaffold --models     # models only
-php artisan model:scaffold --controllers
-php artisan model:scaffold --views
-php artisan model:scaffold --force      # skip confirmations
-php artisan model:scaffold --connection=pgsql
+php artisan capyrel:new
+# > a blog with posts, tags, categories, authors, and comments
+# → Post, Tag, Category, Author, Comment
+
+php artisan migrate
+php artisan model:scaffold
+php artisan model:resources    # API Resources with whenLoaded()
+php artisan model:requests     # StorePostRequest, UpdatePostRequest
+php artisan model:tests        # Pest relationship tests
+php artisan capyrel:openapi    # OpenAPI 3.0 spec
 ```
 
-**What it writes to each model:**
+Generated in ~30 seconds:
+- 5 models with all relationships + casts
+- 5 migrations
+- 5 controllers with paginated `index()`, search, eager loading
+- 5 API Resources (N+1-proof via `whenLoaded`)
+- 10 Form Requests with column-derived validation rules
+- Pest tests for every relationship
+- Full OpenAPI spec ready for Postman/Swagger
 
+---
+
+### E-commerce store
+
+```bash
+php artisan capyrel:new
+# > Product, Order, OrderItem, Customer, Review, Category, Coupon
+
+# After review — each model gets archetype-matched fields:
+# Product: name, slug, description, price:decimal, stock:integer, is_active:boolean
+# Order:   reference, total:decimal, status, customer_id
+# ...
+
+php artisan migrate
+php artisan model:scaffold
+php artisan model:factory      # factories for all 7 models
+php artisan model:seed         # seeder classes
+php artisan capyrel:typescript # TypeScript interfaces for your frontend
+php artisan capyrel:postman    # Postman collection with all routes
+```
+
+---
+
+### SaaS with teams + subscriptions
+
+```bash
+php artisan capyrel:new
+# > User, Team, TeamMember, Plan, Subscription, Invoice, Permission
+
+php artisan migrate
+php artisan model:scaffold
+
+php artisan model:state-machine Subscription
+# → Generates SubscriptionStateMachine: pending → active → cancelled → expired
+
+php artisan model:permissions
+# → Spatie permission matrix across Team, User, and all resources
+
+php artisan model:broadcast User
+# → Event + channel classes for real-time team notifications
+
+php artisan capyrel:health-controller
+# → /api/health endpoint with DB + cache checks
+```
+
+---
+
+### REST API only
+
+```bash
+php artisan capyrel:new
+# > Article, Author, Publication, Tag, Bookmark
+
+php artisan migrate
+php artisan model:scaffold --models --controllers --routes
+php artisan model:resources    # API Resources
+php artisan model:requests     # validation
+php artisan capyrel:openapi    # docs
+php artisan capyrel:typescript # types for frontend
+php artisan capyrel:postman    # ready-to-import collection
+```
+
+---
+
+## All commands
+
+### New project wizard
+
+```bash
+php artisan capyrel:new              # interactive wizard
+php artisan capyrel:new --force      # skip all confirmations
+php artisan capyrel:new --no-python  # use PHP-only entity parser
+```
+
+The wizard:
+1. Detects your installed packages (Livewire, Scout, Sanctum, Spatie, Cashier, Filament)
+2. Parses your description into entities using NLP (Python 3, stdlib only) or PHP heuristics
+3. Matches each entity to an archetype (20+ archetypes: post, product, order, user, invoice…)
+4. Shows proposed fields in an interactive table — add, remove, rename, toggle soft deletes
+5. Loops: "Add another model?" until you're done
+6. Writes models + migrations
+
+---
+
+### Existing database scaffolding
+
+```bash
+php artisan model:scaffold                    # full scaffold
+php artisan model:scaffold User               # one model only
+php artisan model:scaffold --models           # model relationship methods only
+php artisan model:scaffold --controllers      # controllers only
+php artisan model:scaffold --routes           # routes/web.php only
+php artisan model:scaffold --dry-run          # preview, write nothing
+php artisan model:scaffold --force            # skip confirmations
+php artisan model:scaffold --connection=pgsql # specific connection
+```
+
+Writes to each **model**:
 ```php
-// capyrel: posts.user_id
 public function posts(): HasMany
 {
-    return $this->hasMany(Post::class);
+    return $this->hasMany(Post::class);  // capyrel: posts.user_id
 }
 
-// capyrel: pivot: role_user
 public function roles(): BelongsToMany
 {
-    return $this->belongsToMany(Role::class);
+    return $this->belongsToMany(Role::class);  // capyrel: pivot: role_user
 }
 ```
 
-**What it writes to each controller:**
-
+Writes to each **controller**:
 ```php
-public function index()
+public function index(Request $request)
 {
-    $users = User::with(['posts', 'profile', 'roles'])->paginate(15);
+    $users = User::with(['posts', 'profile', 'roles'])
+        ->when($request->search, fn($q) => $q->where('name', 'like', "%{$request->search}%"))
+        ->paginate(15);
+
     return view('users.index', compact('users'));
 }
 ```
 
-**What it adds to blade views:**
-
-```blade
-{{-- CAPYREL: hasMany → Post --}}
-@forelse($user->posts as $post)
-    {{-- $post->title --}}
-@empty
-    <p>No posts.</p>
-@endforelse
-```
-
 ---
 
-### `model:map`
-
-Generates a visual map of every model and relationship.
+### Relationship map
 
 ```bash
-php artisan model:map                       # ASCII tree in terminal
-php artisan model:map --format=mermaid      # Mermaid.js diagram
+php artisan model:map                        # ASCII tree
+php artisan model:map --format=mermaid       # Mermaid diagram
 php artisan model:map --format=both
 php artisan model:map --save=docs/schema.md
 ```
-
-**ASCII output:**
 
 ```
 User
@@ -112,8 +267,6 @@ User
 ├── belongsToMany    ──▶ Role
 └── hasManyThrough   ──▶ Comment  (via Post)
 ```
-
-**Mermaid output** (paste into GitHub markdown or [mermaid.live](https://mermaid.live)):
 
 ```mermaid
 erDiagram
@@ -124,87 +277,48 @@ erDiagram
 
 ---
 
-### `model:resources`
-
-Generates API Resource classes with `whenLoaded()` on all relationships — N+1 impossible by design.
+### API layer
 
 ```bash
+# API Resources — N+1-proof via whenLoaded()
 php artisan model:resources
-php artisan model:resources User
-php artisan model:resources --force   # overwrite existing
-php artisan model:resources --dry-run
-```
+php artisan model:resources User --force
 
-**Generated `UserResource.php`:**
-
-```php
-public function toArray(Request $request): array
-{
-    return [
-        'id'    => $this->id,
-        'name'  => $this->name,
-        'email' => $this->email,
-
-        // capyrel: relationships — only included when eager-loaded
-        'posts'   => PostResource::collection($this->whenLoaded('posts')),
-        'profile' => new ProfileResource($this->whenLoaded('profile')),
-        'roles'   => RoleResource::collection($this->whenLoaded('roles')),
-    ];
-}
-```
-
----
-
-### `model:requests`
-
-Generates `Store` and `Update` Form Request classes with validation rules derived from column types, constraints, and naming conventions.
-
-```bash
+# Form Requests — rules derived from column types + constraints
 php artisan model:requests
 php artisan model:requests Post
-php artisan model:requests --force
-php artisan model:requests --dry-run
 ```
 
-**Generated `StorePostRequest.php`:**
-
+**`StorePostRequest.php`** (auto-generated):
 ```php
 public function rules(): array
 {
     return [
         'title'   => ['required', 'string', 'max:255'],
         'body'    => ['required', 'string'],
-        'user_id' => ['required', 'integer', 'exists:users,id'],
         'slug'    => ['required', 'string', Rule::unique('posts', 'slug')],
+        'user_id' => ['required', 'integer', 'exists:users,id'],
     ];
 }
 ```
 
-Column → rule mapping: `varchar(255)` → `max:255`, `nullable` → removes `required`, `*_id` FK → `exists:table,id`, `unique index` → `Rule::unique()`, column named `email` → adds `email` rule, column named `*_url` → adds `url` rule.
+Rule inference: `varchar(255)` → `max:255` · `nullable` → removes `required` · `*_id` FK → `exists:table,id` · unique index → `Rule::unique()` · column `email` → adds `email` rule · column `*_url` → adds `url` rule
 
 ---
 
-### `model:tests`
-
-Generates Pest test files for every detected relationship.
+### Tests
 
 ```bash
 php artisan model:tests
 php artisan model:tests User
 php artisan model:tests --dry-run
-php artisan model:tests --force
 ```
 
-**Generated `tests/Models/UserTest.php`:**
-
+**Generated Pest test:**
 ```php
 describe('User relationships', function () {
     it('User::posts() returns a HasMany', function () {
         expect((new User)->posts())->toBeInstanceOf(HasMany::class);
-    });
-
-    it('User::profile() returns a HasOne', function () {
-        expect((new User)->profile())->toBeInstanceOf(HasOne::class);
     });
 
     it('User can attach Role', function () {
@@ -212,81 +326,142 @@ describe('User relationships', function () {
         $role = Role::factory()->create();
         $user->roles()->attach($role->id);
         expect($user->fresh()->roles)->toHaveCount(1);
-    })->skip('Requires factory and DB — remove skip() to enable');
+    })->skip('Remove skip() to enable DB test');
 });
 ```
 
-Run with: `php artisan test --filter=relationships`
+---
+
+### Factories + Seeders
+
+```bash
+php artisan model:factory
+php artisan model:factory Post
+php artisan model:seed
+```
+
+Column-aware: `email` → `fake()->email()` · `*_at` → `fake()->dateTime()` · `boolean` → `fake()->boolean()` · `decimal` → `fake()->randomFloat(2, 1, 999)` · `*_id` FK → uses related factory
 
 ---
 
-### `migrate:safe`
-
-Scans pending migrations for dangerous patterns **before** running them.
+### Architecture layer
 
 ```bash
-php artisan migrate:safe          # scan + confirm + run
-php artisan migrate:safe --check  # scan only, never runs
-php artisan migrate:safe --force  # run without confirmation
+php artisan model:architecture Post
+# → PostRepository, PostService, PostDto
+
+php artisan model:state-machine Order
+# → OrderStateMachine: pending → processing → shipped → delivered → cancelled
+
+php artisan model:policy
+# → PostPolicy with index/view/create/update/delete/restore
+
+php artisan model:enum Post
+# → StatusEnum, TypeEnum from string columns with known patterns
 ```
-
-**Patterns detected:**
-
-| Pattern | Risk level |
-|---|---|
-| Adding NOT NULL column without default to existing table | Error |
-| `Schema::drop()` / `Schema::dropIfExists()` | Error |
-| `TRUNCATE` inside a migration | Error |
-| `->dropColumn()` | Warning |
-| `->unique()` on existing table | Warning |
-| `->change()` column type | Warning |
-| Column rename / table rename | Warning |
-| Manual FK without index | Info |
 
 ---
 
-### `model:watch`
-
-Watches `database/migrations/` for changes and automatically injects new relationship methods into model files.
+### Real-time + integrations
 
 ```bash
-php artisan model:watch
-php artisan model:watch --connection=mysql
-php artisan model:watch --interval=3   # poll every 3 seconds
+php artisan model:broadcast Post
+# → PostCreated, PostUpdated, PostDeleted events + channels
+
+php artisan model:notifications Post
+# → PostNotification class with mail + database channels
+
+php artisan model:livewire Post
+# → PostIndex, PostForm Livewire components (requires livewire/livewire)
+
+php artisan model:events Post
+# → PostObserver + PostCreating / PostUpdated listeners
 ```
 
+---
+
+### Contract generation
+
+```bash
+php artisan capyrel:openapi     # OpenAPI 3.0 YAML spec
+php artisan capyrel:typescript  # TypeScript interfaces
+php artisan capyrel:postman     # Postman collection JSON
+php artisan capyrel:graphql     # GraphQL schema SDL
 ```
-Capyrel Watch Mode
-Watching database/migrations/
-Polling every 2s · Press Ctrl+C to stop
 
-✔ Initial scan complete — 18 relationships detected
+---
 
-[14:32:11] New migration: 2026_05_13_143211_add_team_id_to_posts.php
-✔ Post: 1 new relationship(s) injected
-  + belongsTo(Team) via posts.team_id
+### Safety + ops
+
+```bash
+# Migration safety scanner
+php artisan capyrel:safe-migrate          # scan → confirm → run
+php artisan capyrel:safe-migrate --check  # scan only, never runs
+
+# Health check endpoint
+php artisan capyrel:health-controller     # generates /api/health route + controller
+
+# Webhook dispatcher
+php artisan capyrel:webhooks              # generates WebhookDispatcher
+
+# Permissions matrix (requires spatie/laravel-permission)
+php artisan capyrel:permissions
+
+# Watch mode — auto-updates models when migrations change
+php artisan capyrel:watch
+php artisan capyrel:watch --interval=3
+```
+
+---
+
+### Utilities
+
+```bash
+php artisan model:optimize     # adds eager loading hints, query scopes, indexes
+php artisan capyrel:audit      # full schema health report (without writing anything)
+php artisan capyrel:clean      # removes generated boilerplate
+php artisan capyrel:fullstack  # one command: scaffold + routes + tests
+php artisan capyrel:stubs      # publishes all stubs for customisation
+php artisan capyrel:demo       # generates a demo app schema for testing
 ```
 
 ---
 
 ## Health check
 
-Every `model:scaffold` run includes a full health check on your schema:
+Every `model:scaffold` and `capyrel:audit` run checks your schema:
 
 | Check | What it finds |
 |---|---|
-| N+1 risk | Relationship access inside loops in controllers |
-| Missing index | FK columns with no index (full table scans) |
-| Orphan FK | `_id` columns referencing tables that don't exist |
-| Inverse missing | One-sided relationships (A→B exists, B→A doesn't) |
-| Naming conflict | Generated method names clashing with existing ones |
-| Soft-delete | `deleted_at` column without `SoftDeletes` trait |
-| Eager depth | `hasManyThrough` chains 3+ levels deep |
-| Circular dependency | Self-referential models that would loop on eager load |
-| Cascade risk | FK constraints without `ON DELETE CASCADE` |
-| Dead relationship | Relationships defined but never used anywhere |
-| Fillable drift | `$fillable` columns that don't exist in the table |
+| N+1 risk | Relationship access without eager loading |
+| Missing index | FK columns with no index — full table scan |
+| Orphan FK | `*_id` columns pointing to tables that don't exist |
+| Inverse missing | One-sided relationship — A→B defined, B→A not |
+| Naming conflict | Generated method name clashes with existing method |
+| Soft-delete drift | `deleted_at` column without `SoftDeletes` trait |
+| Eager load depth | `hasManyThrough` chains 3+ levels deep |
+| Circular dependency | Self-referential eager load that would loop |
+| Cascade risk | FK with no `ON DELETE` rule |
+| Dead relationship | Defined but never referenced anywhere |
+| Fillable drift | `$fillable` fields that don't exist in the table |
 | Morph registry | `morphTo` without `Relation::morphMap()` |
+
+---
+
+## Python NLP helper
+
+`capyrel:new` optionally calls `python/capyrel_nlp.py` (bundled, stdlib only — no pip installs) for richer entity and field detection:
+
+```bash
+# What Python adds:
+python3 vendor/.../capyrel/python/capyrel_nlp.py describe "a blog with posts and authors"
+# → {"entities": ["Post", "Author"], "relations": [{"from": "Post", "to": "Author", "type": "belongsTo"}]}
+
+python3 vendor/.../capyrel/python/capyrel_nlp.py fields Product
+# → {"fields": ["name", "slug:string:unique", "description:text:null", "price:decimal", "stock:integer", "is_active:boolean"], "archetype": "product"}
+```
+
+Falls back to PHP heuristics automatically if Python 3 is not available, or pass `--no-python` to always use PHP.
 
 ---
 
@@ -294,12 +469,36 @@ Every `model:scaffold` run includes a full health check on your schema:
 
 | Database | Schema reading | FK detection | Index detection |
 |---|---|---|---|
-| MySQL | ✓ | ✓ | ✓ |
+| MySQL / MariaDB | ✓ | ✓ | ✓ |
 | PostgreSQL | ✓ | ✓ | ✓ |
 | SQLite | ✓ | ✓ | ✓ |
 | MongoDB | ✓ (document sampling + migration fallback) | ✓ (convention) | ✓ |
 
-For MongoDB, capyrel samples live documents to discover field names. For empty collections, it falls back to reading your migration files.
+---
+
+## Configuration
+
+```bash
+php artisan vendor:publish --tag=capyrel-config
+```
+
+`config/capyrel.php` controls:
+
+```php
+'pagination' => ['per_page' => 15, 'type' => 'paginate'],
+
+'features' => [
+    'transaction_pivots' => true,  // wrap pivot syncs in DB::transaction()
+    'json_responses'     => true,  // $request->wantsJson() dual responses
+    'search'             => true,  // search block in index()
+    'soft_deletes'       => true,  // restore/forceDelete methods
+],
+
+'spatie' => [
+    'media_library'  => true,   // auto-detected from composer.json
+    'permissions'    => true,
+],
+```
 
 ---
 
@@ -307,9 +506,10 @@ For MongoDB, capyrel samples live documents to discover field names. For empty c
 
 - PHP 8.2+
 - Laravel 11.x or 12.x
+- Python 3 *(optional — only for richer `capyrel:new` NLP; PHP fallback always available)*
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT

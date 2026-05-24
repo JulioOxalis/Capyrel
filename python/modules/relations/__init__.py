@@ -1,0 +1,1 @@
+"""Relation detection module."""

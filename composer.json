@@ -1,6 +1,6 @@
 {
     "name": "julio/capyrel",
-    "description": "Laravel scaffolding — reads your DB and generates models, controllers, blade pages, factories, policies, seeders, enums, events, tests, and Livewire components automatically.",
+    "description": "Laravel schema intelligence — interactive project wizard (capyrel:new) + existing-DB scaffold: models, controllers, routes, API resources, tests, factories, OpenAPI, TypeScript, and more.",
     "type": "library",
     "license": "MIT",
     "homepage": "https://github.com/JulioOxalis/Capyrel",

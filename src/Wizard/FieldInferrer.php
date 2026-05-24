@@ -24,6 +24,17 @@ use Illuminate\Support\Str;
 class FieldInferrer
 {
     /**
+     * FK column prefixes that are aliases for the users table.
+     * e.g. owner_id, author_id, creator_id → references users, not owners/authors/creators.
+     */
+    private const USER_ALIASES = [
+        'owner', 'author', 'creator', 'editor', 'updater', 'deleter',
+        'sender', 'receiver', 'recipient', 'approver', 'reviewer',
+        'assigned', 'assignee', 'reporter', 'moderator', 'manager',
+        'publisher', 'subscriber', 'inviter', 'invitee', 'operator',
+    ];
+
+    /**
      * Parse and infer from a comma-separated string.
      *
      * @return array<int, array>
@@ -74,7 +85,8 @@ class FieldInferrer
 
         // ── Foreign keys ──────────────────────────────────────────────────────
         if (str_ends_with($lower, '_id')) {
-            $relation = Str::plural(str_replace('_id', '', $lower));
+            $prefix   = str_replace('_id', '', $lower);
+            $relation = in_array($prefix, self::USER_ALIASES, true) ? 'users' : Str::plural($prefix);
             return $this->make($name, 'foreignId', false, false, null, ['references' => $relation]);
         }
 

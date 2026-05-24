@@ -218,6 +218,14 @@ def cmd_analyze(field_string: str) -> dict[str, Any]:
     return {"fields": fields}
 
 
+USER_ALIASES = {
+    "owner", "author", "creator", "editor", "updater", "deleter",
+    "sender", "receiver", "recipient", "approver", "reviewer",
+    "assigned", "assignee", "reporter", "moderator", "manager",
+    "publisher", "subscriber", "inviter", "invitee", "operator",
+}
+
+
 def _infer_field(spec: str) -> dict[str, Any]:
     """Parse a single field spec like 'title' or 'price:decimal' or 'slug:string:unique'."""
     parts    = spec.split(":")
@@ -246,8 +254,8 @@ def _infer_field(spec: str) -> dict[str, Any]:
         result["scale"]     = 2
 
     if inferred_type == "foreignId":
-        import re as _re
-        result["references"] = _re.sub(r"_id$", "s", name)
+        prefix = re.sub(r"_id$", "", name.lower())
+        result["references"] = "users" if prefix in USER_ALIASES else prefix + "s"
 
     return result
 

@@ -5,21 +5,11 @@ namespace Julio\Capyrel\Wizard;
 use Illuminate\Support\Str;
 
 /**
- * Infers typed field definitions from column names or a comma-separated string.
+ * Infers typed field definitions from column names or comma-separated strings.
  *
- * Input examples:
- *   "title, body, published_at, is_featured, price, user_id"
- *   ['title', 'body:text', 'price:decimal', 'is_active:boolean']
- *
- * Output (one entry per field):
- *   [
- *     ['name' => 'title',        'type' => 'string',    'nullable' => false, 'unique' => false, 'default' => null],
- *     ['name' => 'body',         'type' => 'text',      'nullable' => true,  'unique' => false, 'default' => null],
- *     ['name' => 'published_at', 'type' => 'timestamp', 'nullable' => true,  'unique' => false, 'default' => null],
- *     ['name' => 'is_featured',  'type' => 'boolean',   'nullable' => false, 'unique' => false, 'default' => false],
- *     ['name' => 'price',        'type' => 'decimal',   'nullable' => false, 'unique' => false, 'default' => '0.00', 'precision' => 10, 'scale' => 2],
- *     ['name' => 'user_id',      'type' => 'foreignId', 'nullable' => false, 'unique' => false, 'default' => null,  'references' => 'users'],
- *   ]
+ * Supports a "known tables" context so that FKs like team_id correctly
+ * reference `teams` when Team was defined earlier in the same wizard session,
+ * rather than blindly pluralizing.
  */
 class FieldInferrer
 {
@@ -27,18 +17,32 @@ class FieldInferrer
      * FK column prefixes that are aliases for the users table.
      * e.g. owner_id, author_id, creator_id → references users, not owners/authors/creators.
      */
-    private const USER_ALIASES = [
+    public const USER_ALIASES = [
         'owner', 'author', 'creator', 'editor', 'updater', 'deleter',
         'sender', 'receiver', 'recipient', 'approver', 'reviewer',
         'assigned', 'assignee', 'reporter', 'moderator', 'manager',
         'publisher', 'subscriber', 'inviter', 'invitee', 'operator',
+        'member', 'participant', 'attendee', 'follower', 'contact',
     ];
 
+    /** Tables confirmed to exist in this session or in the DB, used for FK resolution. */
+    private array $knownTables = [];
+
+    // ── Context ───────────────────────────────────────────────────────────────
+
     /**
-     * Parse and infer from a comma-separated string.
-     *
-     * @return array<int, array>
+     * Set the tables known to exist so FK resolution can use them.
+     * Pass snake_plural table names, e.g. ['users', 'teams', 'plans'].
      */
+    public function withKnownTables(array $tables): static
+    {
+        $clone              = clone $this;
+        $clone->knownTables = array_map('strtolower', $tables);
+        return $clone;
+    }
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
     public function fromString(string $input): array
     {
         $parts = preg_split('/[,;]+/', $input);
@@ -46,10 +50,7 @@ class FieldInferrer
     }
 
     /**
-     * Infer types from an array of field specs.
-     * Each item is either "name" or "name:type" or "name:type:modifier".
-     *
-     * @param  string[]  $fields
+     * @param  string[]  $fields  e.g. ['title', 'body:text', 'user_id', 'team_id']
      * @return array<int, array>
      */
     public function fromArray(array $fields): array
@@ -77,7 +78,7 @@ class FieldInferrer
     }
 
     /**
-     * Infer a single field definition purely from its column name.
+     * Infer a single field definition from its column name.
      */
     public function infer(string $name): array
     {
@@ -85,16 +86,15 @@ class FieldInferrer
 
         // ── Foreign keys ──────────────────────────────────────────────────────
         if (str_ends_with($lower, '_id')) {
-            $prefix   = str_replace('_id', '', $lower);
-            $relation = in_array($prefix, self::USER_ALIASES, true) ? 'users' : Str::plural($prefix);
-            return $this->make($name, 'foreignId', false, false, null, ['references' => $relation]);
+            $prefix   = substr($lower, 0, -3); // strip _id
+            $table    = $this->resolveTable($prefix);
+            return $this->make($name, 'foreignId', false, false, null, ['references' => $table]);
         }
 
         // ── Timestamps ────────────────────────────────────────────────────────
         if (in_array($lower, ['created_at', 'updated_at', 'deleted_at'])) {
             return $this->make($name, 'timestamp', true);
         }
-
         if (str_ends_with($lower, '_at') || str_ends_with($lower, '_date') || str_ends_with($lower, '_on')) {
             return $this->make($name, 'timestamp', true);
         }
@@ -122,7 +122,6 @@ class FieldInferrer
         if (in_array($lower, ['body', 'content', 'description', 'summary', 'notes', 'bio', 'details', 'message', 'text', 'html', 'markdown'])) {
             return $this->make($name, 'text', true);
         }
-
         if (in_array($lower, ['meta', 'settings', 'options', 'config', 'data', 'payload', 'attributes', 'extra', 'properties'])) {
             return $this->make($name, 'json', true);
         }
@@ -165,18 +164,51 @@ class FieldInferrer
             return $this->make($name, 'string', true);
         }
 
-        // ── Colour ───────────────────────────────────────────────────────────
+        // ── Colour / phone ────────────────────────────────────────────────────
         if (str_contains($lower, 'color') || str_contains($lower, 'colour')) {
             return $this->make($name, 'string', true);
         }
-
-        // ── Phone ─────────────────────────────────────────────────────────────
         if (str_contains($lower, 'phone') || str_contains($lower, 'mobile') || str_contains($lower, 'fax')) {
             return $this->make($name, 'string', true);
         }
 
-        // Default → string
         return $this->make($name, 'string', false);
+    }
+
+    // ── FK resolution ─────────────────────────────────────────────────────────
+
+    /**
+     * Resolve the correct table name for a FK prefix.
+     *
+     * Priority:
+     *   1. User-alias (owner, author…) → users
+     *   2. Known tables from this session (exact snake_plural match)
+     *   3. Simple pluralisation fallback
+     */
+    public function resolveTable(string $prefix): string
+    {
+        $lower = strtolower($prefix);
+
+        // 1. User aliases always → users
+        if (in_array($lower, self::USER_ALIASES, true)) {
+            return 'users';
+        }
+
+        // 2. Check known tables — try plural then singular match
+        $plural = Str::plural($lower);
+
+        if (in_array($plural, $this->knownTables, true)) {
+            return $plural;
+        }
+
+        // Try snake_case variant (e.g. team_member → team_members)
+        $snakePlural = Str::snake($plural);
+        if (in_array($snakePlural, $this->knownTables, true)) {
+            return $snakePlural;
+        }
+
+        // 3. Fallback: simple pluralise
+        return $plural;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -188,7 +220,7 @@ class FieldInferrer
 
         $extra = match ($type) {
             'decimal', 'float' => ['precision' => 10, 'scale' => 2],
-            'foreignId'        => ['references' => Str::plural(str_replace('_id', '', strtolower($name)))],
+            'foreignId'        => ['references' => $this->resolveTable(str_replace('_id', '', strtolower($name)))],
             default            => [],
         };
 
@@ -196,12 +228,12 @@ class FieldInferrer
     }
 
     private function make(
-        string  $name,
-        string  $type,
-        bool    $nullable = false,
-        bool    $unique   = false,
-        mixed   $default  = null,
-        array   $extra    = [],
+        string $name,
+        string $type,
+        bool   $nullable = false,
+        bool   $unique   = false,
+        mixed  $default  = null,
+        array  $extra    = [],
     ): array {
         return array_filter([
             'name'     => $name,

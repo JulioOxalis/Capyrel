@@ -30,8 +30,7 @@ use Julio\Capyrel\Writers\MigrationWriter;
 class NewProjectCommand extends Command
 {
     protected $signature = 'capyrel:new
-                            {--force       : Skip all confirmation prompts, write everything}
-                            {--skip-python : Skip Python NLP and use PHP heuristic parsing only}';
+                            {--force : Skip all confirmation prompts, write everything}';
 
     protected $description = 'Interactive wizard — define models and migrations for your new project';
 
@@ -99,16 +98,18 @@ class NewProjectCommand extends Command
 
     private function collectPlans(array $existing): array
     {
-        $plans   = [];
-        $isFirst = true;
+        $plans         = [];
+        // Seed known entities with what already exists so FK resolution works from the start
+        $knownEntities = $existing;
+        $isFirst       = true;
 
         while (true) {
             if ($isFirst) {
-                $plans   = $this->collectFromDescription($existing);
-                $isFirst = false;
+                $plans         = $this->collectFromDescription($existing, $knownEntities);
+                $knownEntities = array_merge($knownEntities, array_column($plans, 'entity'));
+                $isFirst       = false;
             }
 
-            // "Any more models?" loop
             $this->line('');
 
             if ($this->option('force')) break;
@@ -131,17 +132,18 @@ class NewProjectCommand extends Command
                 continue;
             }
 
-            $plan = $this->buildEntityPlan($name);
+            $plan = $this->buildEntityPlan($name, $knownEntities);
 
             if ($plan !== null) {
-                $plans[] = $plan;
+                $plans[]         = $plan;
+                $knownEntities[] = $plan['entity'];
             }
         }
 
         return $plans;
     }
 
-    private function collectFromDescription(array $existing): array
+    private function collectFromDescription(array $existing, array &$knownEntities): array
     {
         $this->line('  <fg=white;options=bold>Step 1 — Describe your project</>');
         $this->line('  <fg=gray>Examples: "a blog with posts, tags, and authors"</>');
@@ -162,9 +164,7 @@ class NewProjectCommand extends Command
             return [];
         }
 
-        // Filter out already-existing models
-        $entities = array_filter($entities, fn($e) => !in_array($e, $existing, true));
-        $entities = array_values($entities);
+        $entities = array_values(array_filter($entities, fn($e) => !in_array($e, $existing, true)));
 
         if (empty($entities)) {
             $this->line('  <fg=gray>All detected models already exist.</>');
@@ -178,25 +178,34 @@ class NewProjectCommand extends Command
         $plans = [];
 
         foreach ($entities as $entity) {
-            $plan = $this->buildEntityPlan($entity);
+            // Each confirmed entity is immediately added to known list
+            // so the next entity's FK resolution benefits from it
+            $plan = $this->buildEntityPlan($entity, $knownEntities);
 
             if ($plan !== null) {
-                $plans[] = $plan;
+                $plans[]         = $plan;
+                $knownEntities[] = $plan['entity'];
             }
         }
 
         return $plans;
     }
 
-    private function buildEntityPlan(string $entity): ?array
+    private function buildEntityPlan(string $entity, array $knownEntities = []): ?array
     {
         $this->line("  ── <fg=white;options=bold>{$entity}</> ──────────────────────────");
         $this->line('');
 
-        // Get archetype fields from Python or heuristic fallback
         $defaultFields = $this->suggestFields($entity);
 
-        if (!empty($defaultFields)) {
+        // For composite names with no archetype match, hint the auto-detected FKs
+        if (empty($defaultFields)) {
+            $preview = $this->planBuilder->build($entity, [], false, $knownEntities);
+            if (!empty($preview['fields'])) {
+                $defaultFields = array_column($preview['fields'], 'name');
+                $this->line('  <fg=gray>Auto-detected fields: ' . implode(', ', $defaultFields) . '</>');
+            }
+        } else {
             $this->line('  <fg=gray>Suggested fields (from archetype): ' . implode(', ', $defaultFields) . '</>');
         }
 
@@ -205,12 +214,10 @@ class NewProjectCommand extends Command
             empty($defaultFields) ? 'name, description:text:null' : implode(', ', $defaultFields),
         );
 
-        $fieldSpecs = array_map('trim', explode(',', $fieldInput ?? ''));
-        $fieldSpecs = array_filter($fieldSpecs);
+        $fieldSpecs = array_values(array_filter(array_map('trim', explode(',', $fieldInput ?? ''))));
 
-        $plan = $this->planBuilder->build($entity, array_values($fieldSpecs));
+        $plan = $this->planBuilder->build($entity, $fieldSpecs, false, $knownEntities);
 
-        // Interactive review/edit loop
         $confirmed = $this->editor->review($this, $plan);
 
         return $confirmed ? $plan : null;
@@ -220,7 +227,7 @@ class NewProjectCommand extends Command
 
     private function parseDescription(string $description): array
     {
-        if (!$this->option('skip-python')) {
+        if ($this->resolvePythonBin() !== null) {
             $entities = $this->pythonDescribe($description);
 
             if (!empty($entities)) {
@@ -234,7 +241,7 @@ class NewProjectCommand extends Command
 
     private function suggestFields(string $entity): array
     {
-        if (!$this->option('skip-python')) {
+        if ($this->resolvePythonBin() !== null) {
             $result = $this->runPython('fields', $entity);
 
             if (isset($result['fields']) && is_array($result['fields'])) {

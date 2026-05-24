@@ -5,26 +5,17 @@ namespace Julio\Capyrel\Wizard;
 use Illuminate\Support\Str;
 
 /**
- * Assembles a complete "model plan" from an entity name and inferred fields.
+ * Assembles a complete model plan from an entity name + field specs.
  *
- * The plan is a plain array — serialisable to JSON, readable by the wizard,
- * consumable by ModelWriter and MigrationWriter.
+ * Accepts a list of "known entities" (already defined in this wizard session
+ * or detected in app/Models/) so that FK resolution and composite-name
+ * detection can reference the right tables.
  *
- * Plan structure:
- * [
- *   'entity'     => 'Post',
- *   'table'      => 'posts',
- *   'fillable'   => ['title', 'body', 'user_id'],
- *   'casts'      => ['published_at' => 'datetime', 'is_featured' => 'boolean', 'meta' => 'array'],
- *   'timestamps' => true,
- *   'softDeletes'=> false,
- *   'relations'  => [
- *     ['type' => 'belongsTo', 'related' => 'User', 'foreign_key' => 'user_id'],
- *   ],
- *   'fields'     => [ ...raw FieldInferrer output... ],
- *   'traits'     => ['Searchable'],   // from LaravelAwareness
- *   'interfaces' => [],
- * ]
+ * Composite-name detection examples:
+ *   TeamMember   → team_id (→ teams) + user_id (→ users)
+ *   OrderItem    → order_id (→ orders) + item_id OR just order_id
+ *   ProjectTask  → project_id (→ projects) + task_id (→ tasks)
+ *   PostTag      → post_id (→ posts) + tag_id (→ tags)
  */
 class ModelPlanBuilder
 {
@@ -34,20 +25,32 @@ class ModelPlanBuilder
     ) {}
 
     /**
-     * Build a plan from a entity name and raw field specs.
+     * Build a plan.
      *
-     * @param  string    $entity  StudlyCase model name (e.g. 'BlogPost')
-     * @param  string[]  $fieldSpecs  Raw field specs, e.g. ['title', 'body:text', 'user_id']
-     * @param  bool      $softDeletes  Whether to add deleted_at / SoftDeletes
+     * @param  string    $entity        StudlyCase model name
+     * @param  string[]  $fieldSpecs    Raw field specs e.g. ['title', 'body:text', 'user_id']
+     * @param  bool      $softDeletes
+     * @param  string[]  $knownEntities StudlyCase entities already defined this session
      */
-    public function build(string $entity, array $fieldSpecs, bool $softDeletes = false): array
-    {
-        $fields    = $this->inferrer->fromArray($fieldSpecs);
+    public function build(
+        string $entity,
+        array  $fieldSpecs,
+        bool   $softDeletes    = false,
+        array  $knownEntities  = [],
+    ): array {
+        // Build the known-tables context from known entities + always include users/teams defaults
+        $knownTables = $this->entitiesToTables(array_merge(['User'], $knownEntities));
+        $inferrer    = $this->inferrer->withKnownTables($knownTables);
+
+        // Auto-inject FK fields for composite names if the user gave no fields
+        $fieldSpecs = $this->injectCompositeFields($entity, $fieldSpecs, $knownEntities, $inferrer);
+
+        $fields    = $inferrer->fromArray($fieldSpecs);
         $table     = Str::snake(Str::plural($entity));
         $fillable  = $this->buildFillable($fields);
         $casts     = $this->buildCasts($fields);
-        $relations = $this->buildRelations($fields);
-        $traits    = $this->buildTraits($entity);
+        $relations = $this->buildRelations($fields, $inferrer);
+        $traits    = $this->buildTraits();
 
         return [
             'entity'      => $entity,
@@ -63,12 +66,95 @@ class ModelPlanBuilder
         ];
     }
 
+    // ── Composite-name detection ──────────────────────────────────────────────
+
+    /**
+     * If entity looks like a junction/pivot (TeamMember, OrderItem, PostTag),
+     * and the user supplied no FK fields, inject the appropriate foreign keys.
+     *
+     * @param  string[]   $fieldSpecs
+     * @param  string[]   $knownEntities
+     * @return string[]   Possibly augmented fieldSpecs
+     */
+    private function injectCompositeFields(
+        string       $entity,
+        array        $fieldSpecs,
+        array        $knownEntities,
+        FieldInferrer $inferrer,
+    ): array {
+        $parts = $this->splitCamelCase($entity);
+
+        // Only act on 2-part names and only if no FK fields already provided
+        if (count($parts) < 2) {
+            return $fieldSpecs;
+        }
+
+        $existingFks = array_filter($fieldSpecs, fn($s) => str_ends_with(explode(':', $s)[0], '_id'));
+
+        if (!empty($existingFks)) {
+            return $fieldSpecs; // user already specified FK fields, trust them
+        }
+
+        $injected = [];
+
+        foreach ($parts as $part) {
+            $lower = strtolower($part);
+            $fkName = $lower . '_id';
+
+            // Resolve where this FK points
+            $table = $inferrer->resolveTable($lower);
+
+            // Only inject if it points somewhere meaningful
+            // (known entity, users table, or a standard table name)
+            if ($table === 'users' ||
+                in_array($table, $this->entitiesToTables($knownEntities), true) ||
+                in_array(Str::studly(Str::singular($part)), $knownEntities, true)
+            ) {
+                $injected[] = $fkName;
+            }
+        }
+
+        if (!empty($injected)) {
+            // Prepend the FK fields; keep any non-FK specs the user typed
+            $nonFkSpecs = array_filter($fieldSpecs, fn($s) => !str_ends_with(explode(':', $s)[0], '_id'));
+            return array_merge($injected, array_values($nonFkSpecs));
+        }
+
+        return $fieldSpecs;
+    }
+
+    /**
+     * Split a StudlyCase name on word boundaries.
+     * 'TeamMember' → ['Team', 'Member']
+     * 'ProjectTaskAssignment' → ['Project', 'Task', 'Assignment']
+     */
+    private function splitCamelCase(string $name): array
+    {
+        $parts = preg_split('/(?<=[a-z])(?=[A-Z])/', $name);
+        return array_values(array_filter($parts ?? []));
+    }
+
+    /**
+     * Convert StudlyCase entity names to snake_plural table names.
+     * ['TeamMember', 'Plan'] → ['team_members', 'plans']
+     *
+     * @param  string[]  $entities
+     * @return string[]
+     */
+    public function entitiesToTables(array $entities): array
+    {
+        return array_values(array_map(
+            fn($e) => Str::snake(Str::plural($e)),
+            $entities,
+        ));
+    }
+
     // ── Private builders ──────────────────────────────────────────────────────
 
     private function buildFillable(array $fields): array
     {
         $skip = ['id', 'created_at', 'updated_at', 'deleted_at', 'remember_token',
-                  'email_verified_at', 'two_factor_secret', 'two_factor_recovery_codes'];
+                 'email_verified_at', 'two_factor_secret', 'two_factor_recovery_codes'];
 
         return array_values(array_filter(
             array_column($fields, 'name'),
@@ -99,14 +185,14 @@ class ModelPlanBuilder
         return $casts;
     }
 
-    private function buildRelations(array $fields): array
+    private function buildRelations(array $fields, FieldInferrer $inferrer): array
     {
         $relations = [];
 
         foreach ($fields as $f) {
             if ($f['type'] !== 'foreignId') continue;
 
-            $references = $f['references'] ?? Str::plural(str_replace('_id', '', $f['name']));
+            $references = $f['references'] ?? $inferrer->resolveTable(str_replace('_id', '', $f['name']));
             $related    = Str::studly(Str::singular($references));
 
             $relations[] = [
@@ -119,7 +205,7 @@ class ModelPlanBuilder
         return $relations;
     }
 
-    private function buildTraits(string $entity): array
+    private function buildTraits(): array
     {
         $traits = [];
 
@@ -136,15 +222,16 @@ class ModelPlanBuilder
 
     // ── Plan manipulation helpers ─────────────────────────────────────────────
 
-    /**
-     * Add a new field spec to an existing plan, re-inferring the field definition.
-     */
     public function addField(array &$plan, string $fieldSpec): void
     {
-        $defs = $this->inferrer->fromArray([$fieldSpec]);
+        $inferrer = $this->inferrer->withKnownTables(
+            $this->entitiesToTables(['User'])
+        );
+
+        $defs = $inferrer->fromArray([$fieldSpec]);
         if (empty($defs)) return;
 
-        $def  = $defs[0];
+        $def = $defs[0];
         $plan['fields'][] = $def;
 
         if (!in_array($def['name'], $plan['fillable'], true)) {
@@ -176,13 +263,10 @@ class ModelPlanBuilder
         }
     }
 
-    /**
-     * Remove a field from a plan by name.
-     */
     public function removeField(array &$plan, string $fieldName): void
     {
-        $plan['fields']   = array_values(array_filter($plan['fields'],   fn($f) => $f['name'] !== $fieldName));
-        $plan['fillable'] = array_values(array_filter($plan['fillable'], fn($n) => $n !== $fieldName));
+        $plan['fields']    = array_values(array_filter($plan['fields'],    fn($f) => $f['name'] !== $fieldName));
+        $plan['fillable']  = array_values(array_filter($plan['fillable'],  fn($n) => $n !== $fieldName));
         unset($plan['casts'][$fieldName]);
         $plan['relations'] = array_values(array_filter($plan['relations'], fn($r) => ($r['foreign_key'] ?? '') !== $fieldName));
     }

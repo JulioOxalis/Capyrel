@@ -19,7 +19,7 @@ The Pipeline is the only public surface the CLI (capyrel_nlp.py) needs.
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
-from engine.schema_graph import SchemaGraph, ModelNode, Field
+from engine.schema_graph import SchemaGraph, ModelNode, Field, Relation
 from engine.context import ProjectContext
 from engine.parser import Parser
 from engine.analyzer import Analyzer
@@ -168,6 +168,136 @@ class Pipeline:
             model_plan.get("warnings", []) + warnings
         ))
         return model_plan
+
+    def analyze_graph_dict(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Full analysis on a pre-built schema dict from PHP's RelationshipDetector.
+
+        Relations are ground truth (real FK constraints) — we skip parser
+        inference and run enrichment-only passes, then layer on optimization,
+        security, and architecture modules.
+
+        Expected shape:
+        {
+          "models": {
+            "Post": {
+              "fields":    [{"name":"title","type":"string","nullable":false,...}],
+              "relations": [{"type":"hasMany","target":"Comment","foreign_key":"post_id",...}],
+              "fillable":  ["title","body"]   // optional, from existing model file
+            }
+          }
+        }
+        """
+        graph = self._graph_from_dict(schema)
+
+        # Enrichment only — do not infer relations we already have
+        self.analyzer.enrich_ground_truth(graph)
+
+        plan = self.planner.plan(graph)
+
+        from modules.optimization.analyzer import OptimizationAnalyzer
+        from modules.security.analyzer import SecurityAnalyzer
+        from modules.architecture.analyzer import ArchitectureAnalyzer
+        from modules.relations.detector import RelationDetector
+
+        # Run polymorphic / hasManyThrough detection on top of ground truth
+        RelationDetector(self.ctx).detect_all(graph)
+
+        optimization  = OptimizationAnalyzer().analyze(graph)
+        security      = SecurityAnalyzer().analyze(graph)
+        architecture  = ArchitectureAnalyzer(self.ctx).analyze(graph)
+
+        return {
+            "plan":         plan,
+            "optimization": optimization,
+            "security":     security,
+            "architecture": architecture,
+        }
+
+    def _graph_from_dict(self, schema: Dict[str, Any]) -> SchemaGraph:
+        """
+        Build a SchemaGraph from a PHP-serialised schema dict.
+        All nodes start with confidence=1.0 (ground truth from live DB).
+        """
+        graph = SchemaGraph()
+
+        # PHP type_name → Blueprint type
+        TYPE_MAP: Dict[str, str] = {
+            "varchar": "string",    "char": "string",
+            "text": "text",         "mediumtext": "text",   "longtext": "text",
+            "tinytext": "text",
+            "int": "integer",       "integer": "integer",   "bigint": "integer",
+            "smallint": "integer",  "mediumint": "integer",
+            "tinyint": "boolean",   "boolean": "boolean",   "bool": "boolean",
+            "decimal": "decimal",   "float": "decimal",     "double": "decimal",
+            "numeric": "decimal",   "real": "decimal",
+            "datetime": "timestamp","timestamp": "timestamp",
+            "date": "date",
+            "json": "json",         "jsonb": "json",
+            "enum": "string",
+            "uuid": "uuid",         "ulid": "string",
+            "binary": "string",
+        }
+
+        for model_name, model_data in schema.get("models", {}).items():
+            fields: List[Field] = []
+
+            for f in model_data.get("fields", []):
+                name     = f["name"]
+                db_type  = f.get("type", "string")
+                nullable = bool(f.get("nullable", False))
+                unique   = bool(f.get("unique", False))
+
+                # FK columns override type regardless of DB type
+                if name.endswith("_id") and db_type not in ("uuid",):
+                    field_type = "foreignId"
+                    refs = f.get("references") or (name[:-3] + "s")  # naive plural
+                else:
+                    field_type = TYPE_MAP.get(db_type, "string")
+                    refs = None
+
+                fields.append(Field(
+                    name=name,
+                    type=field_type,
+                    nullable=nullable,
+                    unique=unique,
+                    references=refs,
+                    confidence=1.0,
+                ))
+
+            relations: List[Relation] = []
+
+            for r in model_data.get("relations", []):
+                target = r.get("target") or r.get("related", "")
+                if not target:
+                    continue
+
+                relations.append(Relation(
+                    type=r["type"],
+                    target=target,
+                    foreign_key=r.get("foreign_key") or r.get("via"),
+                    local_key=r.get("local_key"),
+                    pivot=r.get("pivot"),
+                    through=r.get("through"),
+                    morph_name=r.get("morph_name"),
+                    confidence=1.0,
+                    source="explicit",
+                ))
+
+            fillable = model_data.get("fillable", [f.name for f in fields
+                                                   if f.name not in ("id", "created_at", "updated_at", "deleted_at")])
+
+            node = ModelNode(
+                name=model_name,
+                fields=fields,
+                relations=relations,
+                fillable=fillable,
+                confidence=1.0,
+                source="existing",
+            )
+            graph.add_model(node)
+
+        return graph
 
     def full_plan(self, text: str) -> str:
         """Convenience: describe → analyze → plan → JSON string."""

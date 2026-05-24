@@ -83,6 +83,38 @@ def cmd_plan(
     return p.build_model_plan(entity, field_specs, soft_deletes, known_entities)
 
 
+def cmd_graph(schema_path: str, **kw: Any) -> dict:
+    """
+    Analyze a pre-built schema dict from PHP's RelationshipDetector.
+    Relations are ground truth — no inference, only enrichment + module analysis.
+
+    schema_path: path to a JSON file (written by PHP to avoid shell-quoting issues).
+    File is deleted after reading.
+
+    File shape:
+    {
+      "models": {
+        "Post": {
+          "fields":    [{"name":"title","type":"varchar","nullable":false},...],
+          "relations": [{"type":"hasMany","target":"Comment","foreign_key":"post_id"},...],
+          "fillable":  ["title","body"]
+        }
+      }
+    }
+    """
+    import os
+    with open(schema_path, "r", encoding="utf-8-sig") as fh:
+        schema = json.load(fh)
+
+    try:
+        os.unlink(schema_path)
+    except OSError:
+        pass
+
+    p = _pipeline(**kw)
+    return p.analyze_graph_dict(schema)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -115,6 +147,12 @@ def main() -> None:
                         help="JSON array of already-defined entity names")
     plan_p.add_argument("--soft-deletes",  action="store_true")
 
+    # graph
+    graph_p = sub.add_parser("graph", help="Analyze a pre-built ground-truth schema (from PHP RelationshipDetector)")
+    graph_p.add_argument("schema_path", help="Path to a JSON file containing the schema dict")
+    graph_p.add_argument("--packages",  default="", help="Comma-separated composer package names")
+    graph_p.add_argument("--tables",    default="", help="Comma-separated known migrated table names")
+
     args = parser.parse_args()
 
     try:
@@ -139,6 +177,11 @@ def main() -> None:
                 known_entities=known_entities,
                 soft_deletes=args.soft_deletes,
             )
+
+        elif args.command == "graph":
+            packages     = [p for p in args.packages.split(",") if p]
+            known_tables = [t for t in args.tables.split(",")   if t]
+            result = cmd_graph(args.schema_path, packages=packages, known_tables=known_tables)
 
         else:
             print(json.dumps({"error": f"Unknown command: {args.command}"}), file=sys.stderr)

@@ -76,6 +76,21 @@ class Analyzer:
         self._flag_orphan_models(graph)
         return graph
 
+    def enrich_ground_truth(self, graph: SchemaGraph) -> SchemaGraph:
+        """
+        Enrichment-only pass for ground-truth graphs (e.g. built from a live DB).
+        Skips relation inference (we already have the real FK constraints) and
+        runs only the passes that add value on top of known-good data.
+        """
+        self._assign_archetypes(graph)
+        self._suggest_casts(graph)
+        self._suggest_indexes(graph)
+        self._flag_soft_deletes(graph)
+        self._cross_check_fk_references(graph)
+        self._check_missing_timestamps(graph)
+        self._flag_orphan_models(graph)
+        return graph
+
     # ── Archetype assignment ──────────────────────────────────────────────────
 
     def _assign_archetypes(self, graph: SchemaGraph) -> None:

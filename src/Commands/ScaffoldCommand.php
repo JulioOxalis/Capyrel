@@ -183,72 +183,73 @@ class ScaffoldCommand extends Command
     private function runPythonIntelligence(array $all): void
     {
         $python = $this->resolvePythonBin();
-        if ($python === null) return;
+        if ($python === null) {
+            $this->line('  <fg=gray>Python not found — skipping intelligence analysis.</>');
+            return;
+        }
 
-        $modelNames    = array_keys($all);
-        $knownEntities = [];
-        $anyResults    = false;
+        if (!file_exists($this->pythonScript)) {
+            return;
+        }
 
         $this->line('');
         $this->line('  <fg=white;options=bold>⚙ Python Intelligence Analysis</>');
+        $this->line('  <fg=gray>Sending ground-truth schema to engine...</>');
         $this->line('');
 
-        // Gather installed packages for context
-        $packages = $this->getInstalledPackages();
+        $result = $this->runPythonGraph($all, $python);
 
-        foreach ($all as $modelName => $rels) {
-            $columns = $this->getColumnsForModel($modelName);
+        if (empty($result)) {
+            $this->line('  <fg=gray>Engine returned no results.</> ');
+            return;
+        }
 
-            // Convert DB column data → field specs the engine understands
-            $fieldSpecs = $this->columnsToFieldSpecs($columns);
+        $plan         = $result['plan']         ?? [];
+        $optimization = $result['optimization'] ?? [];
+        $security     = $result['security']     ?? [];
+        $architecture = $result['architecture'] ?? [];
 
-            $result = $this->runPythonPlan(
-                $modelName,
-                $fieldSpecs,
-                $knownEntities,
-                $packages,
-                $python,
-            );
+        // ── Per-model findings ────────────────────────────────────────────────
+        foreach ($plan['models'] ?? [] as $modelName => $modelPlan) {
+            $archetype  = $modelPlan['archetype']  ?? null;
+            $confidence = $modelPlan['confidence'] ?? null;
+            $warnings   = $modelPlan['warnings']   ?? [];
 
-            if (empty($result)) continue;
-
-            $anyResults = true;
-            $knownEntities[] = $modelName;
-
-            $archetype  = $result['archetype'] ?? null;
-            $confidence = $result['confidence'] ?? null;
-            $warnings   = $result['warnings'] ?? [];
-
-            $arch_label = $archetype
+            $archLabel = $archetype
                 ? " <fg=gray>archetype: <fg=white>{$archetype}</> ({$this->confidenceBar($confidence)})</>"
                 : '';
 
-            $this->line("  <fg=cyan>◆</> <fg=white;options=bold>{$modelName}</>{$arch_label}");
+            $this->line("  <fg=cyan>◆</> <fg=white;options=bold>{$modelName}</>{$archLabel}");
 
-            // Show per-model warnings from the engine
-            foreach ($warnings as $warning) {
-                if (str_contains($warning, 'soft_deletes enabled') && isset($result['soft_deletes']) && $result['soft_deletes']) {
+            // Engine model warnings (soft-delete suggestion, timestamp note)
+            foreach ($warnings as $w) {
+                if (str_contains($w, 'soft_deletes enabled')) {
                     $this->line("    <fg=yellow>⚡</> Engine suggests: enable SoftDeletes (archetype: {$archetype})");
-                } elseif (!str_contains($warning, 'timestamps')) {
-                    $this->line("    <fg=yellow>⚠</> {$warning}");
+                } elseif (!str_contains($w, 'created_at/updated_at')) {
+                    $this->line("    <fg=yellow>⚠</> {$w}");
                 }
             }
 
-            // Optimization: N+1 risk from hasMany relations
-            $hasManyRels = array_filter($rels, fn($r) => $r['type'] === 'hasMany');
-            if (count($hasManyRels) >= 2) {
-                $targets = implode(', ', array_column($hasManyRels, 'related'));
-                $this->line("    <fg=yellow>⚡</> N+1 risk: {$modelName} has " . count($hasManyRels) . " hasMany ({$targets}) — controller uses eager loading automatically");
+            // Optimization findings for this model
+            foreach ($optimization as $rec) {
+                if (($rec['model'] ?? '') !== $modelName) continue;
+                $icon  = $rec['severity'] === 'warning' ? '<fg=yellow>⚡</>' : '<fg=gray>ℹ</>';
+                $this->line("    {$icon} {$rec['message']}");
             }
 
-            // Security: sensitive fields in fillable
-            $sensitiveFillable = $this->detectSensitiveFillable($result['fillable'] ?? [], $result['fields'] ?? []);
-            foreach ($sensitiveFillable as $warn) {
-                $this->line("    <fg=red>⚠ Security:</> {$warn}");
+            // Security findings for this model
+            foreach ($security as $finding) {
+                if (($finding['model'] ?? '') !== $modelName) continue;
+                $icon  = match ($finding['severity'] ?? 'info') {
+                    'high'   => '<fg=red>⚠ Security:</>',
+                    'medium' => '<fg=yellow>⚠ Security:</>',
+                    default  => '<fg=gray>ℹ Security:</>',
+                };
+                $this->line("    {$icon} {$finding['message']}");
             }
 
-            // Field hints from engine (Enum cast suggestions etc.)
-            foreach ($result['fields'] ?? [] as $field) {
+            // Field-level hints
+            foreach ($modelPlan['fields'] ?? [] as $field) {
                 if (!empty($field['hint'])) {
                     $this->line("    <fg=gray>💡 {$field['name']}:</> {$field['hint']}");
                 }
@@ -257,116 +258,152 @@ class ScaffoldCommand extends Command
             $this->line('');
         }
 
-        // Architecture-level suggestions
-        if ($anyResults && count($modelNames) >= 4) {
+        // ── Global warnings from engine ───────────────────────────────────────
+        foreach ($plan['warnings'] ?? [] as $w) {
+            $msg = is_array($w) ? ($w['message'] ?? '') : $w;
+            if ($msg) {
+                $this->line("  <fg=yellow>⚠</> {$msg}");
+            }
+        }
+
+        // ── Architecture suggestions ──────────────────────────────────────────
+        if (!empty($architecture)) {
             $this->line('  <fg=white;options=bold>Architecture Suggestions</>');
             $this->line('');
 
-            $financialModels = array_filter($modelNames, fn($n) => in_array(strtolower($n), ['order','invoice','payment','subscription']));
-            if (count($financialModels) >= 2) {
-                $this->line('  <fg=yellow>⚡</> Financial models detected (' . implode(', ', $financialModels) . ') — consider Events + Listeners for audit trail');
-            }
-
-            $userOwnedCount = 0;
-            foreach ($all as $modelName => $rels) {
-                $cols = array_column($this->getColumnsForModel($modelName), 'name');
-                if (in_array('user_id', $cols) || in_array('owner_id', $cols)) $userOwnedCount++;
-            }
-            if ($userOwnedCount >= 3) {
-                $this->line("  <fg=yellow>⚡</> {$userOwnedCount} models have user_id — use Laravel Policies for ownership authorization");
-            }
-
-            if (count($modelNames) >= 10) {
-                $this->line('  <fg=yellow>⚡</> Large schema (' . count($modelNames) . ' models) — consider Repository pattern for complex queries');
-            }
-
-            if ($this->awareness->hasScout()) {
-                $this->line('  <fg=cyan>ℹ</> Laravel Scout detected — Searchable trait available for indexable models');
+            foreach ($architecture as $suggestion) {
+                $priority = $suggestion['priority'] ?? 'low';
+                $icon     = match ($priority) {
+                    'high'   => '<fg=red>⚡</>',
+                    'medium' => '<fg=yellow>⚡</>',
+                    default  => '<fg=cyan>ℹ</>',
+                };
+                $this->line("  {$icon} {$suggestion['reason']}");
             }
 
             $this->line('');
         }
-    }
 
-    private function detectSensitiveFillable(array $fillable, array $fields): array
-    {
-        $sensitive = ['password', 'token', 'secret', 'api_key', 'two_factor', 'recovery'];
-        $adminFields = ['is_admin', 'is_superuser', 'role', 'permissions', 'access_level'];
-        $warnings = [];
-
-        foreach ($fillable as $name) {
-            foreach ($sensitive as $kw) {
-                if (str_contains(strtolower($name), $kw)) {
-                    $warnings[] = "{$name} is sensitive but in \$fillable — remove it";
-                    break;
+        // ── Index suggestions surfaced by engine ──────────────────────────────
+        $indexSuggestions = array_filter($optimization, fn($r) => ($r['type'] ?? '') === 'missing_index');
+        if (!empty($indexSuggestions)) {
+            $this->line('  <fg=white;options=bold>Missing Indexes (engine)</>');
+            $this->line('');
+            foreach ($indexSuggestions as $rec) {
+                $this->line("  <fg=yellow>⚠</> {$rec['message']}");
+                $table = Str::snake(Str::plural($rec['model'] ?? ''));
+                $col   = $rec['column'] ?? '';
+                if ($table && $col) {
+                    $this->line("    <fg=gray>Fix: \$table->index('{$col}'); in the {$table} migration</>");
                 }
             }
-            if (in_array($name, $adminFields)) {
-                $warnings[] = "{$name} looks like a privilege field in \$fillable — mass-assignment risk";
-            }
+            $this->line('');
         }
-
-        return $warnings;
     }
 
-    private function columnsToFieldSpecs(array $columns): array
+    /**
+     * Serialize the full PHP-detected schema into a JSON dict and call
+     * `capyrel_nlp.py graph <json>` once, returning the full analysis result.
+     */
+    private function runPythonGraph(array $all, string $python): array
     {
-        $specs = [];
-        $typeMap = [
-            'varchar'    => 'string',   'char'       => 'string',
-            'text'       => 'text',     'mediumtext' => 'text',   'longtext' => 'text',
-            'int'        => 'integer',  'integer'    => 'integer', 'bigint'   => 'integer',
-            'tinyint'    => 'boolean',  'boolean'    => 'boolean',
-            'decimal'    => 'decimal',  'float'      => 'decimal', 'double' => 'decimal',
-            'datetime'   => 'timestamp','timestamp'  => 'timestamp',
-            'date'       => 'date',
-            'json'       => 'json',     'jsonb'      => 'json',
-            'enum'       => 'string',
-        ];
+        $models = [];
 
-        foreach ($columns as $col) {
-            $name     = $col['name'];
-            $dbType   = strtolower($col['type_name'] ?? 'varchar');
-            $nullable = (bool) ($col['nullable'] ?? false);
+        foreach ($all as $modelName => $rels) {
+            $columns = $this->getColumnsForModel($modelName);
 
-            if (str_ends_with($name, '_id')) {
-                $spec = $name;
-            } else {
-                $type = $typeMap[$dbType] ?? 'string';
-                $spec = $name . ':' . $type;
-                if ($nullable) $spec .= ':null';
-            }
-
-            $specs[] = $spec;
+            $models[$modelName] = [
+                'fields'    => $this->columnsToFieldDicts($columns),
+                'relations' => $this->relsToDicts($rels),
+                'fillable'  => $this->fillableFromColumns($columns),
+            ];
         }
 
-        return $specs;
-    }
+        // Write schema to a temp file — avoids shell-quoting issues for large payloads.
+        // Python reads the file and deletes it automatically.
+        $tmpFile = tempnam(sys_get_temp_dir(), 'capyrel_schema_') . '.json';
+        file_put_contents($tmpFile, json_encode(['models' => $models]));
 
-    private function runPythonPlan(
-        string $modelName,
-        array  $fieldSpecs,
-        array  $knownEntities,
-        array  $packages,
-        string $python,
-    ): array {
-        if (!file_exists($this->pythonScript)) return [];
+        $packages = implode(',', $this->getInstalledPackages());
+        $tables   = implode(',', array_map(
+            fn($m) => Str::snake(Str::plural($m)),
+            array_keys($all),
+        ));
 
-        $script  = escapeshellarg($this->pythonScript);
-        $entity  = escapeshellarg($modelName);
-        $specs   = escapeshellarg(json_encode($fieldSpecs));
-        $known   = escapeshellarg(json_encode($knownEntities));
-        $pkgs    = escapeshellarg(implode(',', $packages));
+        $script = escapeshellarg($this->pythonScript);
+        $tmp    = escapeshellarg($tmpFile);
+        $pkgs   = escapeshellarg($packages);
+        $tbls   = escapeshellarg($tables);
 
         $cmd = PHP_OS_FAMILY === 'Windows'
-            ? "{$python} {$script} plan {$entity} {$specs} {$known} --packages={$pkgs} 2>NUL"
-            : "{$python} {$script} plan {$entity} {$specs} {$known} --packages={$pkgs} 2>/dev/null";
+            ? "{$python} {$script} graph {$tmp} --packages={$pkgs} --tables={$tbls} 2>NUL"
+            : "{$python} {$script} graph {$tmp} --packages={$pkgs} --tables={$tbls} 2>/dev/null";
 
-        $output  = shell_exec($cmd);
+        $output = shell_exec($cmd);
+
+        // Clean up temp file in case Python didn't delete it (e.g. on error)
+        if (file_exists($tmpFile)) {
+            @unlink($tmpFile);
+        }
+
         if (empty($output)) return [];
 
         $decoded = json_decode(trim($output), true);
         return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * Convert DB column metadata → field dicts the Python engine's _graph_from_dict understands.
+     * We send the DB type name directly so the engine can map it precisely.
+     */
+    private function columnsToFieldDicts(array $columns): array
+    {
+        return array_values(array_map(fn($col) => [
+            'name'     => $col['name'],
+            'type'     => strtolower($col['type_name'] ?? 'varchar'),
+            'nullable' => (bool) ($col['nullable'] ?? false),
+            'unique'   => (bool) ($col['unique']   ?? false),
+        ], $columns));
+    }
+
+    /**
+     * Convert RelationshipDetector relation dicts → Python engine relation dicts.
+     * Maps 'related' → 'target' and 'via' → 'foreign_key' / 'pivot'.
+     */
+    private function relsToDicts(array $rels): array
+    {
+        return array_values(array_map(function (array $rel) {
+            $dict = [
+                'type'   => $rel['type'],
+                'target' => $rel['related'] ?? '',
+            ];
+
+            if (!empty($rel['via'])) {
+                // belongsToMany: 'via' is the pivot table name
+                if ($rel['type'] === 'belongsToMany') {
+                    $dict['pivot'] = $rel['via'];
+                } else {
+                    $dict['foreign_key'] = $rel['via'];
+                }
+            }
+
+            if (!empty($rel['through'])) {
+                $dict['through'] = $rel['through'];
+            }
+
+            return $dict;
+        }, $rels));
+    }
+
+    private function fillableFromColumns(array $columns): array
+    {
+        $skip = ['id', 'created_at', 'updated_at', 'deleted_at', 'remember_token',
+                 'email_verified_at', 'two_factor_secret', 'two_factor_recovery_codes'];
+
+        return array_values(array_filter(
+            array_column($columns, 'name'),
+            fn($n) => !in_array($n, $skip, true),
+        ));
     }
 
     private function getInstalledPackages(): array

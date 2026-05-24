@@ -12,6 +12,7 @@ use Julio\Capyrel\Schema\RelationshipDetector;
 use Julio\Capyrel\Writers\ControllerWriter;
 use Julio\Capyrel\Writers\ModelWriter;
 use Julio\Capyrel\Writers\RouteWriter;
+use Julio\Capyrel\Wizard\LaravelAwareness;
 
 class ScaffoldCommand extends Command
 {
@@ -22,9 +23,12 @@ class ScaffoldCommand extends Command
                             {--controllers     : Generate/update controllers only}
                             {--routes          : Write resource routes to web.php}
                             {--dry-run         : Preview everything, write nothing}
-                            {--force           : Skip all confirmation prompts}';
+                            {--force           : Skip all confirmation prompts}
+                            {--analyze         : Run Python intelligence analysis and show recommendations}';
 
     protected $description = 'Detect DB relationships and scaffold models, controllers, and routes';
+
+    private string $pythonScript;
 
     public function __construct(
         private SchemaAnalyzer       $analyzer,
@@ -34,8 +38,10 @@ class ScaffoldCommand extends Command
         private ControllerWriter     $controllerWriter,
         private RouteWriter          $routeWriter,
         private FrameworkDetector    $frameworkDetector,
+        private LaravelAwareness     $awareness,
     ) {
         parent::__construct();
+        $this->pythonScript = __DIR__ . '/../../python/capyrel_nlp.py';
     }
 
     public function handle(): int
@@ -80,6 +86,11 @@ class ScaffoldCommand extends Command
 
         $issues = $this->diagnostics->run($all, $this->analyzer);
         $this->displayHealthCheck($issues);
+
+        // ── Python intelligence analysis ───────────────────────────────────────
+        if ($this->option('analyze') || $this->option('dry-run')) {
+            $this->runPythonIntelligence($all);
+        }
 
         if ($this->option('dry-run')) {
             $this->line('  <fg=yellow>Dry run — no files were changed.</>');
@@ -165,6 +176,224 @@ class ScaffoldCommand extends Command
         $this->line('');
 
         return self::SUCCESS;
+    }
+
+    // ── Python intelligence ───────────────────────────────────────────────────
+
+    private function runPythonIntelligence(array $all): void
+    {
+        $python = $this->resolvePythonBin();
+        if ($python === null) return;
+
+        $modelNames    = array_keys($all);
+        $knownEntities = [];
+        $anyResults    = false;
+
+        $this->line('');
+        $this->line('  <fg=white;options=bold>⚙ Python Intelligence Analysis</>');
+        $this->line('');
+
+        // Gather installed packages for context
+        $packages = $this->getInstalledPackages();
+
+        foreach ($all as $modelName => $rels) {
+            $columns = $this->getColumnsForModel($modelName);
+
+            // Convert DB column data → field specs the engine understands
+            $fieldSpecs = $this->columnsToFieldSpecs($columns);
+
+            $result = $this->runPythonPlan(
+                $modelName,
+                $fieldSpecs,
+                $knownEntities,
+                $packages,
+                $python,
+            );
+
+            if (empty($result)) continue;
+
+            $anyResults = true;
+            $knownEntities[] = $modelName;
+
+            $archetype  = $result['archetype'] ?? null;
+            $confidence = $result['confidence'] ?? null;
+            $warnings   = $result['warnings'] ?? [];
+
+            $arch_label = $archetype
+                ? " <fg=gray>archetype: <fg=white>{$archetype}</> ({$this->confidenceBar($confidence)})</>"
+                : '';
+
+            $this->line("  <fg=cyan>◆</> <fg=white;options=bold>{$modelName}</>{$arch_label}");
+
+            // Show per-model warnings from the engine
+            foreach ($warnings as $warning) {
+                if (str_contains($warning, 'soft_deletes enabled') && isset($result['soft_deletes']) && $result['soft_deletes']) {
+                    $this->line("    <fg=yellow>⚡</> Engine suggests: enable SoftDeletes (archetype: {$archetype})");
+                } elseif (!str_contains($warning, 'timestamps')) {
+                    $this->line("    <fg=yellow>⚠</> {$warning}");
+                }
+            }
+
+            // Optimization: N+1 risk from hasMany relations
+            $hasManyRels = array_filter($rels, fn($r) => $r['type'] === 'hasMany');
+            if (count($hasManyRels) >= 2) {
+                $targets = implode(', ', array_column($hasManyRels, 'related'));
+                $this->line("    <fg=yellow>⚡</> N+1 risk: {$modelName} has " . count($hasManyRels) . " hasMany ({$targets}) — controller uses eager loading automatically");
+            }
+
+            // Security: sensitive fields in fillable
+            $sensitiveFillable = $this->detectSensitiveFillable($result['fillable'] ?? [], $result['fields'] ?? []);
+            foreach ($sensitiveFillable as $warn) {
+                $this->line("    <fg=red>⚠ Security:</> {$warn}");
+            }
+
+            // Field hints from engine (Enum cast suggestions etc.)
+            foreach ($result['fields'] ?? [] as $field) {
+                if (!empty($field['hint'])) {
+                    $this->line("    <fg=gray>💡 {$field['name']}:</> {$field['hint']}");
+                }
+            }
+
+            $this->line('');
+        }
+
+        // Architecture-level suggestions
+        if ($anyResults && count($modelNames) >= 4) {
+            $this->line('  <fg=white;options=bold>Architecture Suggestions</>');
+            $this->line('');
+
+            $financialModels = array_filter($modelNames, fn($n) => in_array(strtolower($n), ['order','invoice','payment','subscription']));
+            if (count($financialModels) >= 2) {
+                $this->line('  <fg=yellow>⚡</> Financial models detected (' . implode(', ', $financialModels) . ') — consider Events + Listeners for audit trail');
+            }
+
+            $userOwnedCount = 0;
+            foreach ($all as $modelName => $rels) {
+                $cols = array_column($this->getColumnsForModel($modelName), 'name');
+                if (in_array('user_id', $cols) || in_array('owner_id', $cols)) $userOwnedCount++;
+            }
+            if ($userOwnedCount >= 3) {
+                $this->line("  <fg=yellow>⚡</> {$userOwnedCount} models have user_id — use Laravel Policies for ownership authorization");
+            }
+
+            if (count($modelNames) >= 10) {
+                $this->line('  <fg=yellow>⚡</> Large schema (' . count($modelNames) . ' models) — consider Repository pattern for complex queries');
+            }
+
+            if ($this->awareness->hasScout()) {
+                $this->line('  <fg=cyan>ℹ</> Laravel Scout detected — Searchable trait available for indexable models');
+            }
+
+            $this->line('');
+        }
+    }
+
+    private function detectSensitiveFillable(array $fillable, array $fields): array
+    {
+        $sensitive = ['password', 'token', 'secret', 'api_key', 'two_factor', 'recovery'];
+        $adminFields = ['is_admin', 'is_superuser', 'role', 'permissions', 'access_level'];
+        $warnings = [];
+
+        foreach ($fillable as $name) {
+            foreach ($sensitive as $kw) {
+                if (str_contains(strtolower($name), $kw)) {
+                    $warnings[] = "{$name} is sensitive but in \$fillable — remove it";
+                    break;
+                }
+            }
+            if (in_array($name, $adminFields)) {
+                $warnings[] = "{$name} looks like a privilege field in \$fillable — mass-assignment risk";
+            }
+        }
+
+        return $warnings;
+    }
+
+    private function columnsToFieldSpecs(array $columns): array
+    {
+        $specs = [];
+        $typeMap = [
+            'varchar'    => 'string',   'char'       => 'string',
+            'text'       => 'text',     'mediumtext' => 'text',   'longtext' => 'text',
+            'int'        => 'integer',  'integer'    => 'integer', 'bigint'   => 'integer',
+            'tinyint'    => 'boolean',  'boolean'    => 'boolean',
+            'decimal'    => 'decimal',  'float'      => 'decimal', 'double' => 'decimal',
+            'datetime'   => 'timestamp','timestamp'  => 'timestamp',
+            'date'       => 'date',
+            'json'       => 'json',     'jsonb'      => 'json',
+            'enum'       => 'string',
+        ];
+
+        foreach ($columns as $col) {
+            $name     = $col['name'];
+            $dbType   = strtolower($col['type_name'] ?? 'varchar');
+            $nullable = (bool) ($col['nullable'] ?? false);
+
+            if (str_ends_with($name, '_id')) {
+                $spec = $name;
+            } else {
+                $type = $typeMap[$dbType] ?? 'string';
+                $spec = $name . ':' . $type;
+                if ($nullable) $spec .= ':null';
+            }
+
+            $specs[] = $spec;
+        }
+
+        return $specs;
+    }
+
+    private function runPythonPlan(
+        string $modelName,
+        array  $fieldSpecs,
+        array  $knownEntities,
+        array  $packages,
+        string $python,
+    ): array {
+        if (!file_exists($this->pythonScript)) return [];
+
+        $script  = escapeshellarg($this->pythonScript);
+        $entity  = escapeshellarg($modelName);
+        $specs   = escapeshellarg(json_encode($fieldSpecs));
+        $known   = escapeshellarg(json_encode($knownEntities));
+        $pkgs    = escapeshellarg(implode(',', $packages));
+
+        $cmd = PHP_OS_FAMILY === 'Windows'
+            ? "{$python} {$script} plan {$entity} {$specs} {$known} --packages={$pkgs} 2>NUL"
+            : "{$python} {$script} plan {$entity} {$specs} {$known} --packages={$pkgs} 2>/dev/null";
+
+        $output  = shell_exec($cmd);
+        if (empty($output)) return [];
+
+        $decoded = json_decode(trim($output), true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    private function getInstalledPackages(): array
+    {
+        $composerPath = base_path('composer.json');
+        if (!file_exists($composerPath)) return [];
+
+        $composer = json_decode(file_get_contents($composerPath), true) ?? [];
+        return array_keys(array_merge($composer['require'] ?? [], $composer['require-dev'] ?? []));
+    }
+
+    private function resolvePythonBin(): ?string
+    {
+        foreach (['python3', 'python'] as $bin) {
+            $test = shell_exec("{$bin} --version 2>&1");
+            if ($test && str_contains($test, 'Python 3')) {
+                return $bin;
+            }
+        }
+        return null;
+    }
+
+    private function confidenceBar(float|null $conf): string
+    {
+        if ($conf === null) return '';
+        $pct = (int) round($conf * 100);
+        return "{$pct}%";
     }
 
     // ── Scaffold helpers ──────────────────────────────────────────────────────

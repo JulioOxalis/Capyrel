@@ -26,9 +26,19 @@ class RouteWriter
             );
 
             if ($install) {
-                $runComposer('composer require julio/oxalis:@dev');
-                $this->oxalisFound = true;
-                $middleware        = 'auth';
+                // Require the package
+                $runComposer('composer require julio/oxalis');
+
+                // Re-check so we know the install succeeded before continuing
+                $this->oxalisFound = $this->detectOxalis();
+
+                if ($this->oxalisFound) {
+                    // Run the Oxalis installer which publishes config, migrations and sets up the guard
+                    $runComposer('php artisan oxalis:install');
+                    $this->printOxalisNextSteps();
+                }
+
+                $middleware = 'auth';
             }
         } else {
             $middleware = 'auth';
@@ -37,6 +47,19 @@ class RouteWriter
         $this->appendRoutes($models, $middleware);
 
         return $middleware;
+    }
+
+    private function printOxalisNextSteps(): void
+    {
+        echo "\n";
+        echo "  \033[32m✔\033[0m Oxalis installed and configured.\n";
+        echo "\n";
+        echo "  \033[33mOxalis next steps:\033[0m\n";
+        echo "  \033[90m  1.\033[0m Run \033[36mphp artisan migrate\033[0m to create the passkey tables.\n";
+        echo "  \033[90m  2.\033[0m Add the \033[36mOxalisUser\033[0m trait to your User model.\n";
+        echo "  \033[90m  3.\033[0m Visit \033[36m/oxalis/register\033[0m to set up your first passkey.\n";
+        echo "  \033[90m  4.\033[0m Protect routes with \033[36mmiddleware('auth')\033[0m — Oxalis hooks into Laravel's standard guard.\n";
+        echo "\n";
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace Julio\Capyrel;
 
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider;
 
 // ── Analyzers ─────────────────────────────────────────────────────────────────
@@ -200,6 +201,9 @@ class CapyrelServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/capyrel.php', 'capyrel');
+
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'capyrel');
+        Blade::component('capyrel::components.flash', 'capyrel-flash');
 
         if ($this->app->runningInConsole()) {
             $this->publishes([

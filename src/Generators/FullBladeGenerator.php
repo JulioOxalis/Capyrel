@@ -229,39 +229,7 @@ BLADE : '';
         </div>
     </div>
 
-    {{-- ═══ TOAST ═══ --}}
-    <div x-data="{
-            toasts: [],
-            add(e) {
-                const t = { id: Date.now(), type: e.detail?.type ?? 'success', message: e.detail?.message ?? e.detail ?? 'Done.' };
-                this.toasts.push(t);
-                setTimeout(() => this.toasts = this.toasts.filter(x => x.id !== t.id), 4000);
-            }
-         }"
-         @capyrel-toast.window="add(\$event)"
-         class="fixed bottom-6 right-6 z-[9999] space-y-2 pointer-events-none">
-        <template x-for="t in toasts" :key="t.id">
-            <div x-transition:enter="transition ease-out duration-300"
-                 x-transition:enter-start="opacity-0 translate-y-2"
-                 x-transition:enter-end="opacity-100 translate-y-0"
-                 x-transition:leave="transition ease-in duration-200"
-                 x-transition:leave-start="opacity-100"
-                 x-transition:leave-end="opacity-0"
-                 :class="t.type === 'error' ? 'bg-red-600 text-white' : 'bg-white border border-green-200 text-green-800'"
-                 class="pointer-events-auto flex items-center gap-3 px-5 py-3 rounded-2xl shadow-lg text-sm max-w-sm">
-                <template x-if="t.type !== 'error'">
-                    <svg class="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                </template>
-                <template x-if="t.type === 'error'">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                </template>
-                <span x-text="t.message"></span>
-            </div>
-        </template>
-    </div>
-    @if(session('success'))
-    <script>window.dispatchEvent(new CustomEvent('capyrel-toast',{detail:{type:'success',message:'{{ addslashes(session('success')) }}'}}));</script>
-    @endif
+    <x-capyrel-flash />
 
     {{-- ═══ CREATE SLIDE-OVER ═══ --}}
     <div x-data="{
@@ -759,7 +727,7 @@ BLADE;
         </div>
     </div>
 
-    <div id="capyrelToastContainer" class="position-fixed bottom-0 end-0 p-3" style="z-index:9999"></div>
+    <x-capyrel-flash />
 
 </div>
 @endsection
@@ -767,20 +735,6 @@ BLADE;
 @push('scripts')
 <script>
 (function () {
-    function showToast(msg, type) {
-        var bg = type === 'error' ? 'text-bg-danger' : 'text-bg-success';
-        var el = document.createElement('div');
-        el.className = 'toast show align-items-center ' + bg + ' border-0 rounded-4 shadow mb-2';
-        el.innerHTML = '<div class="d-flex"><div class="toast-body fw-medium">' + msg + '</div>' +
-                       '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>';
-        document.getElementById('capyrelToastContainer').appendChild(el);
-        setTimeout(() => el.remove(), 4500);
-    }
-
-    @if(session('success'))
-    showToast('{{ addslashes(session('success')) }}');
-    @endif
-
     function ajaxForm(formEl, btnEl, errEl, onSuccess) {
         formEl.addEventListener('submit', function (e) {
             e.preventDefault();
@@ -798,9 +752,9 @@ BLADE;
                 else if (status === 422) {
                     errEl.innerHTML = '<ul class="mb-0 ps-3">' + Object.values(data.errors || {}).flat().map(m => '<li>' + m + '</li>').join('') + '</ul>';
                     errEl.classList.remove('d-none');
-                } else { showToast(data.message || 'Error.', 'error'); }
+                } else { window.CyToast(data.message || 'Error.', 'error'); }
             })
-            .catch(function () { showToast('Network error.', 'error'); })
+            .catch(function () { window.CyToast('Network error.', 'error'); })
             .finally(function () { btn.disabled = false; spin.classList.add('d-none'); lbl.textContent = lbl.dataset.orig || 'Save'; });
         });
     }
@@ -811,7 +765,7 @@ BLADE;
     if (cForm && cBtn) {
         ajaxForm(cForm, cBtn, document.getElementById('createErrors'), function (d) {
             bootstrap.Offcanvas.getInstance(document.getElementById('createOffcanvas'))?.hide();
-            showToast(d.message || 'Created.'); cForm.reset();
+            window.CyToast(d.message || 'Created.'); cForm.reset();
             setTimeout(() => window.location.reload(), 800);
         });
     }
@@ -822,7 +776,7 @@ BLADE;
     if (eForm && eBtn) {
         ajaxForm(eForm, eBtn, document.getElementById('editErrors'), function (d) {
             bootstrap.Offcanvas.getInstance(document.getElementById('editOffcanvas'))?.hide();
-            showToast(d.message || 'Updated.');
+            window.CyToast(d.message || 'Updated.');
             setTimeout(() => window.location.reload(), 800);
         });
     }

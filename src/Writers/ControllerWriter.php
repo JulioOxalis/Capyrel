@@ -429,7 +429,7 @@ PHP;
             : "        \${$variables} = \$query->latest()->{$paginateCall};\n";
 
         return <<<PHP
-        \$query = {$modelName}::{$eagerChain};
+        \$query = {$modelName}::query(){$eagerChain};
 {$includesBlock}{$tenantBlock}{$trashedBlock}{$searchBlock}{$enumFilter}{$filterBlock}{$sortBlock}{$paginateLine}{$cacheBlock}
 PHP;
     }

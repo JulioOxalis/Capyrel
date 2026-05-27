@@ -241,9 +241,14 @@ Writes to each **controller**:
 ```php
 public function index(Request $request)
 {
-    $users = User::with(['posts', 'profile', 'roles'])
-        ->when($request->search, fn($q) => $q->where('name', 'like', "%{$request->search}%"))
-        ->paginate(15);
+    $query = User::query()->with(['posts', 'profile', 'roles'])
+        ->withCount(['posts', 'profile', 'roles']);
+
+    if ($request->search) {
+        $query->where('name', 'like', "%{$request->search}%");
+    }
+
+    $users = $query->latest()->paginate(15);
 
     return view('users.index', compact('users'));
 }
@@ -424,6 +429,42 @@ php artisan capyrel:fullstack  # one command: scaffold + routes + tests
 php artisan capyrel:stubs      # publishes all stubs for customisation
 php artisan capyrel:demo       # generates a demo app schema for testing
 ```
+
+---
+
+## Flash notifications
+
+Every generated view includes `<x-capyrel-flash />` — a zero-dependency toast component registered by Capyrel's service provider. No setup required.
+
+**Session flashes** work automatically:
+
+```php
+// In any controller:
+return redirect()->route('posts.index')->with('success', 'Post created.');
+return redirect()->back()->with('error', 'Could not save changes.');
+return redirect()->back()->with('warning', 'Image too large, resized automatically.');
+return redirect()->back()->with('info', 'Changes will take effect after the next sync.');
+```
+
+**Programmatic** (from JS):
+
+```js
+window.CyToast('Saved!', 'success');
+window.CyToast('Could not connect.', 'error');
+window.CyToast('Draft auto-saved.', 'info', 6000);  // custom 6s duration
+```
+
+**From AJAX handlers** (used internally by generated forms):
+
+```js
+window.dispatchEvent(new CustomEvent('capyrel-toast', {
+    detail: { type: 'success', message: 'Record updated.' }
+}));
+```
+
+Supported types: `success` · `error` · `warning` · `info`
+
+Features: slide-in animation · color-matched progress bar · close button · dark mode (`data-theme`, `data-bs-theme`, `.dark`)
 
 ---
 

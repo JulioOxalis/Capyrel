@@ -280,10 +280,12 @@ Produces the PHP method string for a single Eloquent relationship. All 8 types s
 
 ### FullBladeGenerator
 The most complex generator. Produces four complete blade files per model:
-- `index` — modal-first with offcanvas create, slide-over view, delete modal, live search, toasts
+- `index` — modal-first with offcanvas create, slide-over view, delete modal, live search, `<x-capyrel-flash />`
 - `create` — dedicated create page (standalone models only)
 - `edit` — edit form with pre-populated fields
 - `show` — read-only detail page with relationship panels
+
+Every generated view includes `<x-capyrel-flash />` — Capyrel's zero-dependency toast component. It handles `session('success')`, `session('error')`, `session('warning')`, `session('info')`, the `window.CyToast()` JS API, and the `capyrel-toast` window event dispatched by all AJAX form handlers. No external libraries required.
 
 Skips auth-owner columns (`user_id`, `owner_id`, `created_by`, `author_id`, `assigned_to`, `submitted_by`) from all forms — they are stamped server-side.
 
@@ -861,7 +863,7 @@ Every generated index page uses a modal-first layout — no full page loads for 
 | **Delete icon** | Opens delete confirmation modal with record name |
 | **Delete confirm** | Optionally requires typing the name (`CAPYREL_DELETE_TYPING=true`) |
 | **Form submit** | Button disables + spinner + "Creating..." text during submission |
-| **Toast** | Auto-dismissing success notification after create/update/delete |
+| **Toast** | `<x-capyrel-flash />` — slide-in toast with progress bar, 4 types (success/error/warning/info), dark-mode aware, close button. Handles session flashes + `window.CyToast()` API + `capyrel-toast` window events |
 | **Unsaved warning** | Warns before closing modal with dirty form (`CAPYREL_UNSAVED_WARNING=true`) |
 
 ### Standalone vs dependent models
